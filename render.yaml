@@ -3,6 +3,7 @@ services:
   - type: web
     name: roadcompare-api
     env: python
+    plan: free
     buildCommand: pip install -r backend/requirements.txt
     startCommand: cd backend && uvicorn app.main:app --host 0.0.0.0 --port $PORT
     envVars:
@@ -41,6 +42,7 @@ services:
   - type: worker
     name: roadcompare-worker
     env: python
+    plan: free
     buildCommand: pip install -r backend/requirements.txt
     startCommand: cd backend && python -m app.worker
     envVars:
