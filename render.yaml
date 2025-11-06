@@ -68,14 +68,14 @@ services:
       - key: CONFIDENCE_THRESHOLD
         value: 0.25
 
+  - type: redis
+    name: roadcompare-redis
+    plan: free
+    maxmemoryPolicy: allkeys-lru
+
 databases:
   - name: roadcompare-db
     databaseName: roadcompare
     user: roadcompare
     plan: free
-
-redis:
-  - name: roadcompare-redis
-    plan: free
-    maxmemoryPolicy: allkeys-lru
 
