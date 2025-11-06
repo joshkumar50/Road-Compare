@@ -1,6 +1,6 @@
 # RoadCompare Technical Note (1 page)
 
-Architecture: Frontend (Vite React + Tailwind), Backend (FastAPI), Worker (RQ), Redis, Postgres, MinIO, Docker. API orchestrates uploads and job lifecycle; worker executes the ML pipeline.
+Architecture: Frontend (Vite React + Tailwind), Backend (FastAPI), Worker (RQ), Redis, Postgres, MinIO/S3. API orchestrates uploads and job lifecycle; worker executes the ML pipeline.
 
 Pipeline: Videos → frames (1 FPS) → alignment (ORB+RANSAC) → detection (YOLOv8n, classes: sign_board, lane_marking, guardrail, pavement_defect, road_stud, roadside_hazard) → cross-video matching (IoU, class) → change classification (missing/new/moved/faded/unchanged) → temporal filter (N=3) → aggregation → exports (crops, JSON, PDF).
 

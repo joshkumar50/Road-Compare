@@ -37,9 +37,11 @@ OR manually create:
 3. Settings:
    - **Name:** `roadcompare-api`
    - **Environment:** `Python 3`
-   - **Build Command:** `pip install -r backend/requirements.txt`
+   - **Build Command:** `pip install --upgrade pip && pip install --only-binary=scipy --prefer-binary -r backend/requirements.txt`
    - **Start Command:** `cd backend && uvicorn app.main:app --host 0.0.0.0 --port $PORT`
    - **Root Directory:** (leave empty)
+   
+   **Note:** The worker runs in a background thread within this service (no separate worker needed for free tier)
 
 4. **Environment Variables:**
    ```
@@ -59,13 +61,16 @@ OR manually create:
    CONFIDENCE_THRESHOLD=0.25
    ```
 
-### 2.3 Background Worker
+### 2.3 Worker (Optional - Already Included)
 
+**Note:** The worker runs automatically in a background thread within the API service (configured in `app/main.py`). This is a free alternative to a separate worker service. No separate worker service is needed.
+
+If you want a dedicated worker service (for better isolation), you can create one:
 1. **New +** → **Background Worker**
 2. Connect same repo
 3. Settings:
    - **Name:** `roadcompare-worker`
-   - **Build Command:** `pip install -r backend/requirements.txt`
+   - **Build Command:** `pip install --upgrade pip && pip install --only-binary=scipy --prefer-binary -r backend/requirements.txt`
    - **Start Command:** `cd backend && python -m app.worker`
    - Same environment variables as API (except `FRONTEND_URL`)
 
@@ -132,9 +137,10 @@ Or manually run migrations:
 ## Troubleshooting
 
 ### Worker not processing jobs
-- Check Redis connection in worker logs
+- Check Redis connection in API service logs (worker runs in background thread)
 - Verify `REDIS_URL` is set correctly
-- Ensure worker service is running
+- Check `ENABLE_WORKER` env var is not set to "false"
+- If using separate worker service, ensure it's running
 
 ### S3 uploads failing
 - Verify AWS credentials

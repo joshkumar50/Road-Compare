@@ -6,7 +6,7 @@ RoadCompare — Fast, explainable AI audits for road safety.
 
 ## Quick start
 
-Prereqs: Docker Desktop.
+### Local Development
 
 1. Copy env file:
 
@@ -14,28 +14,27 @@ Prereqs: Docker Desktop.
 cp env.example .env
 ```
 
-2. Build and start:
-
+2. Set up backend:
 ```bash
-make build
-make up
+cd backend
+pip install -r requirements.txt
+uvicorn app.main:app --reload
 ```
 
-3. Open the app: `http://localhost:5173` (frontend) and API: `http://localhost:8000/docs`.
-
-4. Sample run (headless demo):
-
+3. Set up frontend (in another terminal):
 ```bash
-make sample-run
+cd frontend
+npm install
+npm run dev
 ```
 
-Artifacts saved to `artifacts_results.json` and `artifacts_report.pdf`.
+4. Open the app: `http://localhost:5173` (frontend) and API: `http://localhost:8000/docs`.
 
-## Services (docker-compose)
+## Services
 - Frontend (Vite React + Tailwind)
 - Backend API (FastAPI)
 - Worker (RQ + YOLOv8 pipeline)
-- Redis, Postgres, MinIO
+- Redis, Postgres, S3/MinIO
 
 ## Environment variables
 See `env.example` for all config knobs.
@@ -62,19 +61,12 @@ See `env.example` for all config knobs.
 - Minimal evaluation utilities are embedded; sample script produces counts and runtime stats. For mAP and richer metrics, fine-tune on your data by swapping the model checkpoint.
 
 ## Tests
-Run tests inside backend container:
+Run tests:
 
 ```bash
-docker compose exec backend pytest -q
+cd backend
+pytest -q
 ```
-
-## Make targets
-- `make build` — build images
-- `make up` — start stack
-- `make down` — stop
-- `make logs` — tail logs
-- `make test` — backend tests
-- `make sample-run` — end-to-end demo script
 
 ## Security & robustness
 - Pre-signed URLs for storage access.
@@ -95,14 +87,6 @@ docker compose exec backend pytest -q
 
 See [DEPLOY_RENDER_VERCEL.md](DEPLOY_RENDER_VERCEL.md) for detailed instructions.
 
-### Docker Compose (Local/Server)
-
-```bash
-cp env.example .env
-make build && make up
-```
-
-Access at `http://localhost:5173` (frontend) and `http://localhost:8000/docs` (API).
 
 
 

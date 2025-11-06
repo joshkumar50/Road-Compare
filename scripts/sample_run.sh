@@ -1,9 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-echo "Starting services..."
-docker compose up -d
-
 API=${API:-http://localhost:8000/api/v1}
 
 echo "Generating sample dataset..."

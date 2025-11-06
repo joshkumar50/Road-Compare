@@ -45,7 +45,7 @@ def start_worker():
         print(f"Worker thread error: {e}")
 
 
-# Only start worker if not explicitly disabled (for local dev with docker-compose)
+# Only start worker if not explicitly disabled (for local dev)
 if os.getenv("ENABLE_WORKER", "true").lower() == "true":
     worker_thread = threading.Thread(target=start_worker, daemon=True)
     worker_thread.start()

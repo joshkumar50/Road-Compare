@@ -242,7 +242,7 @@ def run_pipeline(job_id: str, payload: dict):
 
 
 if __name__ == "__main__":
-    # RQ worker entrypoint convenience (though docker-compose uses rq via run_pipeline enqueue)
+    # RQ worker entrypoint convenience
     # Polling loop to execute queued jobs is handled by RQ workers normally; here we simply block.
     from rq import Worker, Queue
     from redis import Redis

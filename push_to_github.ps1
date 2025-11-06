@@ -44,7 +44,7 @@ $commitMessage = "Initial commit: RoadCompare - Full-stack road infrastructure c
 - FastAPI backend with async job processing
 - React frontend with Tailwind CSS
 - YOLOv8 ML pipeline for road element detection
-- Docker Compose setup for easy deployment
+- Render + Vercel deployment configuration
 - PDF/CSV export functionality
 - Evaluation scripts and metrics dashboard"
 
