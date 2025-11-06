@@ -1,0 +1,12 @@
+Opening slide: RoadCompare — Fast, explainable AI audits for road safety.
+We upload a base and a present video (drag & drop).
+Click Analyze — the progress bar shows pipeline steps.
+Results ready: side-by-side playback with overlays. Click issue #1.
+Modal shows base vs present crop, confidence, and the rule used.
+Export PDF — open report; top 5 issues with images and recommendations.
+Open metrics dashboard: mAP per class, precision/recall for changes, and processing time.
+Final: heatmap of issue clusters to prioritize maintenance.
+
+
+
+
