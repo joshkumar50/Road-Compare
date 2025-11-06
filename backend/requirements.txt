@@ -13,7 +13,7 @@ opencv-python-headless==4.10.0.84
 numpy==1.26.4
 scikit-image==0.24.0
 Pillow==10.4.0
-scipy==1.11.1
+scipy==1.13.0
 ultralytics==8.2.103
 weasyprint==61.2
 jinja2==3.1.4

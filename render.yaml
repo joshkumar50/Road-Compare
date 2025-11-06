@@ -5,7 +5,7 @@ services:
     env: python
     pythonVersion: 3.11.9
     plan: free
-    buildCommand: pip install --upgrade pip && pip install --prefer-binary -r backend/requirements.txt
+    buildCommand: pip install --upgrade pip && pip install --only-binary=scipy --prefer-binary -r backend/requirements.txt
     startCommand: cd backend && uvicorn app.main:app --host 0.0.0.0 --port $PORT
     envVars:
       - key: DATABASE_URL
@@ -45,7 +45,7 @@ services:
     env: python
     pythonVersion: 3.11.9
     plan: free
-    buildCommand: pip install --upgrade pip && pip install --prefer-binary -r backend/requirements.txt
+    buildCommand: pip install --upgrade pip && pip install --only-binary=scipy --prefer-binary -r backend/requirements.txt
     startCommand: cd backend && python -m app.worker
     envVars:
       - key: DATABASE_URL
