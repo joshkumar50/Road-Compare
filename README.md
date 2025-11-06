@@ -85,6 +85,25 @@ docker compose exec backend pytest -q
 ## Notes
 - YOLOv8 model weights download on first run (`ultralytics` manages cache). CPU-only works; GPU improves speed if available.
 
+## Deployment
+
+### Render + Vercel (Recommended for Hackathon)
+
+**Quick Deploy:**
+1. **Render:** Connect GitHub repo → Auto-deploy from `render.yaml`
+2. **Vercel:** Import repo → Set root to `frontend` → Add `VITE_API` env var
+
+See [DEPLOY_RENDER_VERCEL.md](DEPLOY_RENDER_VERCEL.md) for detailed instructions.
+
+### Docker Compose (Local/Server)
+
+```bash
+cp env.example .env
+make build && make up
+```
+
+Access at `http://localhost:5173` (frontend) and `http://localhost:8000/docs` (API).
+
 
 
 

@@ -1,0 +1,81 @@
+services:
+  # Backend API
+  - type: web
+    name: roadcompare-api
+    env: python
+    buildCommand: pip install -r backend/requirements.txt
+    startCommand: cd backend && uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: roadcompare-db
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          name: roadcompare-redis
+          type: redis
+          property: connectionString
+      - key: S3_ENDPOINT
+        value: https://s3.amazonaws.com
+      - key: S3_BUCKET
+        value: roadcompare-storage
+      - key: S3_REGION
+        value: us-east-1
+      - key: S3_SECURE
+        value: true
+      - key: SECRET_KEY
+        generateValue: true
+      - key: API_PREFIX
+        value: /api/v1
+      - key: FRONTEND_URL
+        value: https://roadcompare.vercel.app
+      - key: FRAME_RATE
+        value: 1
+      - key: TEMPORAL_PERSIST_N
+        value: 3
+      - key: CONFIDENCE_THRESHOLD
+        value: 0.25
+    healthCheckPath: /health
+
+  # Worker (RQ)
+  - type: worker
+    name: roadcompare-worker
+    env: python
+    buildCommand: pip install -r backend/requirements.txt
+    startCommand: cd backend && python -m app.worker
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: roadcompare-db
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          name: roadcompare-redis
+          type: redis
+          property: connectionString
+      - key: S3_ENDPOINT
+        value: https://s3.amazonaws.com
+      - key: S3_BUCKET
+        value: roadcompare-storage
+      - key: S3_REGION
+        value: us-east-1
+      - key: S3_SECURE
+        value: true
+      - key: FRAME_RATE
+        value: 1
+      - key: TEMPORAL_PERSIST_N
+        value: 3
+      - key: CONFIDENCE_THRESHOLD
+        value: 0.25
+
+databases:
+  - name: roadcompare-db
+    databaseName: roadcompare
+    user: roadcompare
+    plan: free
+
+redis:
+  - name: roadcompare-redis
+    plan: free
+    maxmemoryPolicy: allkeys-lru
+
