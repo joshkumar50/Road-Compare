@@ -39,38 +39,8 @@ services:
         value: 0.25
     healthCheckPath: /health
 
-  # Worker (RQ)
-  - type: worker
-    name: roadcompare-worker
-    env: python
-    pythonVersion: 3.11.9
-    plan: free
-    buildCommand: pip install --upgrade pip && pip install --only-binary=scipy --prefer-binary -r backend/requirements.txt
-    startCommand: cd backend && python -m app.worker
-    envVars:
-      - key: DATABASE_URL
-        fromDatabase:
-          name: roadcompare-db
-          property: connectionString
-      - key: REDIS_URL
-        fromService:
-          name: roadcompare-redis
-          type: redis
-          property: connectionString
-      - key: S3_ENDPOINT
-        value: https://s3.amazonaws.com
-      - key: S3_BUCKET
-        value: roadcompare-storage
-      - key: S3_REGION
-        value: us-east-1
-      - key: S3_SECURE
-        value: true
-      - key: FRAME_RATE
-        value: 1
-      - key: TEMPORAL_PERSIST_N
-        value: 3
-      - key: CONFIDENCE_THRESHOLD
-        value: 0.25
+  # Note: Worker runs in background thread within the API service (free alternative)
+  # No separate worker service needed
 
   - type: redis
     name: roadcompare-redis

@@ -12,6 +12,8 @@
 6. ✅ Update `FRONTEND_URL` after Vercel deploy
 7. ✅ Copy API URL (e.g., `https://roadcompare-api.onrender.com`)
 
+**Note:** The worker runs in a background thread within the API service (free alternative to a separate $7/month worker service). Jobs will be processed automatically.
+
 ## Vercel (Frontend)
 
 1. ✅ Go to https://vercel.com
