@@ -72,6 +72,8 @@ services:
     name: roadcompare-redis
     plan: free
     maxmemoryPolicy: allkeys-lru
+    ipAllowList:
+      - source: 0.0.0.0/0
 
 databases:
   - name: roadcompare-db
