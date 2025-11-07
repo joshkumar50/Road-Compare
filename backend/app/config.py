@@ -30,6 +30,9 @@ class Settings(BaseModel):
     frame_rate: int = int(os.getenv("FRAME_RATE", "1"))
     temporal_persist_n: int = int(os.getenv("TEMPORAL_PERSIST_N", "3"))
     confidence_threshold: float = float(os.getenv("CONFIDENCE_THRESHOLD", "0.25"))
+    
+    # Demo mode - use synthetic data instead of real video processing
+    demo_mode: bool = os.getenv("DEMO_MODE", "true").lower() == "true"
 
 
 settings = Settings()

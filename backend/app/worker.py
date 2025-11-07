@@ -93,6 +93,109 @@ def iou(a, b):
     return inter / union if union > 0 else 0.0
 
 
+def run_demo_pipeline(job_id: str, job, db, start: float):
+    """Fast demo mode - generates synthetic results without heavy processing"""
+    try:
+        print(f"[Job {job_id}] Creating demo synthetic issues...")
+        
+        # Create 3 demo issues
+        demo_issues = [
+            {
+                "element": "lane_marking",
+                "issue_type": "faded",
+                "severity": "HIGH",
+                "confidence": 0.92,
+                "reason": "Lane marking shows significant fading detected by SSIM analysis (score < 0.6)"
+            },
+            {
+                "element": "sign_board",
+                "issue_type": "missing",
+                "severity": "HIGH",
+                "confidence": 0.87,
+                "reason": "Sign board present in base video not detected in present video (IoU < 0.3)"
+            },
+            {
+                "element": "guardrail",
+                "issue_type": "moved",
+                "severity": "MEDIUM",
+                "confidence": 0.78,
+                "reason": "Guardrail position changed between videos (IoU < 0.3)"
+            }
+        ]
+        
+        # Create synthetic crop images (small colored rectangles)
+        for idx, issue_data in enumerate(demo_issues):
+            issue_id = str(uuid.uuid4())
+            
+            # Create synthetic base image (red box)
+            base_img = np.full((100, 100, 3), 255, np.uint8)
+            cv2.rectangle(base_img, (10, 10), (90, 90), (0, 0, 255), -1)
+            cv2.putText(base_img, "BASE", (20, 55), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
+            
+            # Create synthetic present image (blue box)
+            present_img = np.full((100, 100, 3), 255, np.uint8)
+            if issue_data["issue_type"] == "missing":
+                # Leave blank for missing
+                cv2.putText(present_img, "MISSING", (5, 55), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0), 1)
+            else:
+                cv2.rectangle(present_img, (10, 10), (90, 90), (255, 0, 0), -1)
+                cv2.putText(present_img, "NOW", (25, 55), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
+            
+            # Encode to JPEG
+            _, base_bytes = cv2.imencode('.jpg', base_img)
+            _, present_bytes = cv2.imencode('.jpg', present_img)
+            
+            # Save to storage
+            base_key = f"jobs/{job_id}/crops/{issue_id}_base.jpg"
+            present_key = f"jobs/{job_id}/crops/{issue_id}_present.jpg"
+            put_bytes(base_key, base_bytes.tobytes(), "image/jpeg")
+            put_bytes(present_key, present_bytes.tobytes(), "image/jpeg")
+            
+            base_url = presign_get(base_key)
+            present_url = presign_get(present_key)
+            
+            # Create issue in database
+            issue = Issue(
+                id=issue_id,
+                job_id=job_id,
+                element=issue_data["element"],
+                issue_type=issue_data["issue_type"],
+                severity=issue_data["severity"],
+                confidence=issue_data["confidence"],
+                first_frame=idx * 10,
+                last_frame=(idx + 1) * 10,
+                base_crop_url=base_url,
+                present_crop_url=present_url,
+                reason=issue_data["reason"],
+                gps=None,
+            )
+            db.add(issue)
+        
+        # Update job
+        job.processed_frames = 30
+        job.runtime_seconds = float(time.time() - start)
+        job.summary_json = {
+            "processed_frames": 30,
+            "classes": list(CLASSES.values()),
+            "time_per_min_sample": round(job.runtime_seconds / 30 * 60, 2),
+            "demo_mode": True
+        }
+        job.status = "completed"
+        db.commit()
+        
+        print(f"[Job {job_id}] ✅ Demo completed in {job.runtime_seconds:.2f}s")
+        return True
+        
+    except Exception as e:
+        print(f"[Job {job_id}] ❌ Demo error: {e}")
+        import traceback
+        traceback.print_exc()
+        job.status = "failed"
+        job.summary_json = {"error": str(e)}
+        db.commit()
+        return False
+
+
 def classify_change(det_a, det_b) -> str:
     if det_b is None:
         return "missing"
@@ -119,6 +222,11 @@ def run_pipeline(job_id: str, payload: dict):
         print(f"[Job {job_id}] Status updated to processing")
 
         start = time.time()
+        
+        # DEMO MODE: Skip heavy processing, generate synthetic results immediately
+        if settings.demo_mode:
+            print(f"[Job {job_id}] 🎭 DEMO MODE: Generating synthetic results...")
+            return run_demo_pipeline(job_id, job, db, start)
 
         # Get video paths from storage
         base_key = payload.get("base_key", "")
