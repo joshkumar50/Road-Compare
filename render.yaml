@@ -43,6 +43,8 @@ services:
         value: true
       - key: ENABLE_WORKER
         value: false
+      - key: BACKEND_URL
+        value: https://roadcompare-api.onrender.com
     healthCheckPath: /health
 
   # Note: Worker runs in background thread within the API service (free alternative)

@@ -1,5 +1,6 @@
 import json
 from fastapi import APIRouter, UploadFile, File, Depends, HTTPException
+from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 from typing import List
 from .schemas import JobCreate, PresignRequest, PresignResponse, JobResult, JobSummary, IssueSchema, FeedbackIn
@@ -7,10 +8,11 @@ from .tasks import enqueue_job
 from .db import get_db, Base, engine
 from .models import Job, Issue, Feedback
 from .config import settings
-from .storage import presign_put, presign_get, put_bytes
+from .storage import presign_put, presign_get, put_bytes, STORAGE_DIR, USE_LOCAL_STORAGE
 import uuid
 import csv
 import io
+from pathlib import Path
 
 
 Base.metadata.create_all(bind=engine)
@@ -26,6 +28,26 @@ def presign_upload(data: PresignRequest):
     return PresignResponse(
         base_url=presign_put(base_key), present_url=presign_put(present_key), job_id=job_id
     )
+
+
+@api_router.get("/storage/{file_path:path}")
+async def serve_local_storage(file_path: str):
+    """Serve files from local storage (only when using local storage mode)"""
+    if not USE_LOCAL_STORAGE:
+        raise HTTPException(404, "Local storage not enabled")
+    
+    full_path = STORAGE_DIR / file_path
+    
+    if not full_path.exists():
+        raise HTTPException(404, f"File not found: {file_path}")
+    
+    # Security check: ensure path is within STORAGE_DIR
+    try:
+        full_path.resolve().relative_to(STORAGE_DIR.resolve())
+    except ValueError:
+        raise HTTPException(403, "Access denied")
+    
+    return FileResponse(full_path)
 
 
 @api_router.post("/jobs")

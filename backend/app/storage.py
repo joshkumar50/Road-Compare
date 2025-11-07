@@ -62,8 +62,11 @@ def presign_put(object_name: str) -> str:
 
 def presign_get(object_name: str) -> str:
     if USE_LOCAL_STORAGE:
-        # Return actual file path for local storage
-        return str(STORAGE_DIR / object_name)
+        # Return URL to the storage endpoint
+        from .config import settings
+        # Use the backend API URL to serve the file
+        base_url = os.getenv("BACKEND_URL", "http://localhost:8000")
+        return f"{base_url}{settings.api_prefix}/storage/{object_name}"
     elif USE_AWS_S3:
         return s3_client.generate_presigned_url(
             'get_object',
