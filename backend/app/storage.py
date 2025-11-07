@@ -1,15 +1,27 @@
 import io
 import os
 from urllib.parse import urlparse
+from pathlib import Path
 from .config import settings
 
-# Support both MinIO (local) and AWS S3 (production)
-USE_AWS_S3 = "amazonaws.com" in settings.s3_endpoint or settings.s3_endpoint.startswith("https://s3")
+# Check if AWS credentials are available
+HAS_AWS_CREDENTIALS = bool(os.getenv("AWS_ACCESS_KEY_ID") and os.getenv("AWS_SECRET_ACCESS_KEY"))
 
-if USE_AWS_S3:
+# Support both MinIO (local) and AWS S3 (production)
+USE_AWS_S3 = HAS_AWS_CREDENTIALS and ("amazonaws.com" in settings.s3_endpoint or settings.s3_endpoint.startswith("https://s3"))
+
+# Fallback to local file storage if no credentials
+USE_LOCAL_STORAGE = not HAS_AWS_CREDENTIALS and not os.getenv("MINIO_ROOT_USER")
+
+if USE_LOCAL_STORAGE:
+    print("⚠️ No S3/MinIO credentials found - using local file storage")
+    STORAGE_DIR = Path("/tmp/roadcompare-storage")
+    STORAGE_DIR.mkdir(parents=True, exist_ok=True)
+elif USE_AWS_S3:
     import boto3
     from botocore.config import Config
     
+    print("✅ Using AWS S3 for storage")
     s3_client = boto3.client(
         's3',
         aws_access_key_id=os.getenv("AWS_ACCESS_KEY_ID"),
@@ -34,7 +46,10 @@ else:
 
 
 def presign_put(object_name: str) -> str:
-    if USE_AWS_S3:
+    if USE_LOCAL_STORAGE:
+        # Return a placeholder URL for local storage
+        return f"/local-storage/{object_name}"
+    elif USE_AWS_S3:
         return s3_client.generate_presigned_url(
             'put_object',
             Params={'Bucket': settings.s3_bucket, 'Key': object_name},
@@ -46,7 +61,10 @@ def presign_put(object_name: str) -> str:
 
 
 def presign_get(object_name: str) -> str:
-    if USE_AWS_S3:
+    if USE_LOCAL_STORAGE:
+        # Return local file path
+        return f"/local-storage/{object_name}"
+    elif USE_AWS_S3:
         return s3_client.generate_presigned_url(
             'get_object',
             Params={'Bucket': settings.s3_bucket, 'Key': object_name},
@@ -58,7 +76,12 @@ def presign_get(object_name: str) -> str:
 
 
 def put_bytes(object_name: str, data: bytes, content_type: str = "application/octet-stream"):
-    if USE_AWS_S3:
+    if USE_LOCAL_STORAGE:
+        # Save to local file system
+        file_path = STORAGE_DIR / object_name
+        file_path.parent.mkdir(parents=True, exist_ok=True)
+        file_path.write_bytes(data)
+    elif USE_AWS_S3:
         s3_client.put_object(
             Bucket=settings.s3_bucket,
             Key=object_name,
@@ -73,7 +96,16 @@ def put_bytes(object_name: str, data: bytes, content_type: str = "application/oc
 
 def delete_prefix(prefix: str):
     """Delete all objects with a given prefix"""
-    if USE_AWS_S3:
+    if USE_LOCAL_STORAGE:
+        # Delete local files
+        import shutil
+        prefix_path = STORAGE_DIR / prefix
+        if prefix_path.exists():
+            if prefix_path.is_dir():
+                shutil.rmtree(prefix_path)
+            else:
+                prefix_path.unlink()
+    elif USE_AWS_S3:
         # List all objects with prefix
         paginator = s3_client.get_paginator('list_objects_v2')
         pages = paginator.paginate(Bucket=settings.s3_bucket, Prefix=prefix)
