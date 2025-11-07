@@ -1,6 +1,9 @@
 {
   "buildCommand": "npm ci && npm run build",
   "outputDirectory": "dist",
-  "framework": "vite"
+  "framework": "vite",
+  "env": {
+    "VITE_API": "https://roadcompare-api.onrender.com/api/v1"
+  }
 }
 
