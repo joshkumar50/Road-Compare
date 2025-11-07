@@ -62,8 +62,8 @@ def presign_put(object_name: str) -> str:
 
 def presign_get(object_name: str) -> str:
     if USE_LOCAL_STORAGE:
-        # Return local file path
-        return f"/local-storage/{object_name}"
+        # Return actual file path for local storage
+        return str(STORAGE_DIR / object_name)
     elif USE_AWS_S3:
         return s3_client.generate_presigned_url(
             'get_object',
@@ -92,6 +92,23 @@ def put_bytes(object_name: str, data: bytes, content_type: str = "application/oc
         client = get_minio()
         data_io = io.BytesIO(data)
         client.put_object(settings.s3_bucket, object_name, data_io, length=len(data), content_type=content_type)
+
+
+def get_bytes(object_name: str) -> bytes:
+    """Get object bytes from storage"""
+    if USE_LOCAL_STORAGE:
+        file_path = STORAGE_DIR / object_name
+        if file_path.exists():
+            return file_path.read_bytes()
+        else:
+            raise FileNotFoundError(f"Local file not found: {file_path}")
+    elif USE_AWS_S3:
+        response = s3_client.get_object(Bucket=settings.s3_bucket, Key=object_name)
+        return response['Body'].read()
+    else:
+        client = get_minio()
+        response = client.get_object(settings.s3_bucket, object_name)
+        return response.read()
 
 
 def delete_prefix(prefix: str):

@@ -106,34 +106,44 @@ def classify_change(det_a, det_b) -> str:
 def run_pipeline(job_id: str, payload: dict):
     db: Session = SessionLocal()
     try:
+        print(f"[Job {job_id}] Starting pipeline...")
         job = db.get(Job, job_id)
         if not job:
+            print(f"[Job {job_id}] Job not found in database, creating...")
             job = Job(id=job_id, status="queued")
             db.add(job)
             db.commit()
+        
         job.status = "processing"
         db.commit()
+        print(f"[Job {job_id}] Status updated to processing")
 
         start = time.time()
 
-        # Download URLs (pre-signed get)
+        # Get video paths from storage
         base_key = payload.get("base_key", "")
         present_key = payload.get("present_key", "")
+        
+        if not base_key or not present_key:
+            raise ValueError("Missing video keys in payload")
 
-        base_url = presign_get(base_key) if base_key else None
-        present_url = presign_get(present_key) if present_key else None
+        base_path = presign_get(base_key)
+        present_path = presign_get(present_key)
 
-        print(f"[Job {job_id}] Processing: base_url={bool(base_url)}, present_url={bool(present_url)}")
+        print(f"[Job {job_id}] Video paths: base={base_path}, present={present_path}")
 
         # Extract frames from videos
-        frames_base = extract_frames(base_url or "", fps=payload.get("sample_rate", settings.frame_rate)) or []
-        frames_present = extract_frames(present_url or "", fps=payload.get("sample_rate", settings.frame_rate)) or []
-
-        print(f"[Job {job_id}] Extracted frames: base={len(frames_base)}, present={len(frames_present)}")
+        print(f"[Job {job_id}] Extracting frames from base video...")
+        frames_base = extract_frames(base_path, fps=payload.get("sample_rate", settings.frame_rate)) or []
+        print(f"[Job {job_id}] Extracted {len(frames_base)} frames from base")
+        
+        print(f"[Job {job_id}] Extracting frames from present video...")
+        frames_present = extract_frames(present_path, fps=payload.get("sample_rate", settings.frame_rate)) or []
+        print(f"[Job {job_id}] Extracted {len(frames_present)} frames from present")
 
         if not frames_base or not frames_present:
             # Fallback: generate synthetic frames for demo
-            print(f"[Job {job_id}] Using synthetic frames (video extraction failed)")
+            print(f"[Job {job_id}] ⚠️ Video extraction failed, using synthetic frames for demo")
             frames_base = [np.full((360, 640, 3), 220, np.uint8) for _ in range(5)]
             frames_present = [np.full((360, 640, 3), 220, np.uint8) for _ in range(5)]
             cv2.rectangle(frames_base[2], (200, 200), (260, 260), (0, 255, 0), 2)  # object in base
@@ -141,6 +151,7 @@ def run_pipeline(job_id: str, payload: dict):
 
         print(f"[Job {job_id}] Loading YOLOv8 model...")
         model = YOLO("yolov8n.pt")
+        print(f"[Job {job_id}] Model loaded successfully")
 
         persist_n = settings.temporal_persist_n
         issues_buffer = {}
