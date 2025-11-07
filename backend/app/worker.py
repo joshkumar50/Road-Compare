@@ -105,140 +105,156 @@ def classify_change(det_a, det_b) -> str:
 
 def run_pipeline(job_id: str, payload: dict):
     db: Session = SessionLocal()
-    job = db.get(Job, job_id)
-    if not job:
-        job = Job(id=job_id, status="queued")
-        db.add(job)
+    try:
+        job = db.get(Job, job_id)
+        if not job:
+            job = Job(id=job_id, status="queued")
+            db.add(job)
+            db.commit()
+        job.status = "processing"
         db.commit()
-    job.status = "processing"
-    db.commit()
 
-    start = time.time()
+        start = time.time()
 
-    # Download URLs (pre-signed get) — in local minio we can access via presign
-    base_key = payload.get("base_key", "")
-    present_key = payload.get("present_key", "")
+        # Download URLs (pre-signed get)
+        base_key = payload.get("base_key", "")
+        present_key = payload.get("present_key", "")
 
-    # For demo simplicity, MinIO is accessible via presigned URLs that OpenCV can read via ffmpeg. If not, generate sample videos in eval.
-    base_url = presign_get(base_key) if base_key else None
-    present_url = presign_get(present_key) if present_key else None
+        base_url = presign_get(base_key) if base_key else None
+        present_url = presign_get(present_key) if present_key else None
 
-    # Fallback: if OpenCV cannot read URL, do minimal synthetic frames
-    frames_base = extract_frames(base_url or "", fps=payload.get("sample_rate", settings.frame_rate)) or []
-    frames_present = extract_frames(present_url or "", fps=payload.get("sample_rate", settings.frame_rate)) or []
+        print(f"[Job {job_id}] Processing: base_url={bool(base_url)}, present_url={bool(present_url)}")
 
-    if not frames_base or not frames_present:
-        # generate simple synthetic frames for demo
-        frames_base = [np.full((360, 640, 3), 220, np.uint8) for _ in range(5)]
-        frames_present = [np.full((360, 640, 3), 220, np.uint8) for _ in range(5)]
-        cv2.rectangle(frames_base[2], (200, 200), (260, 260), (0, 255, 0), 2)  # object
-        # remove in present to simulate missing
+        # Extract frames from videos
+        frames_base = extract_frames(base_url or "", fps=payload.get("sample_rate", settings.frame_rate)) or []
+        frames_present = extract_frames(present_url or "", fps=payload.get("sample_rate", settings.frame_rate)) or []
 
-    model = YOLO("yolov8n.pt")
+        print(f"[Job {job_id}] Extracted frames: base={len(frames_base)}, present={len(frames_present)}")
 
-    persist_n = settings.temporal_persist_n
-    issues_buffer = {}
-    total_frames = 0
+        if not frames_base or not frames_present:
+            # Fallback: generate synthetic frames for demo
+            print(f"[Job {job_id}] Using synthetic frames (video extraction failed)")
+            frames_base = [np.full((360, 640, 3), 220, np.uint8) for _ in range(5)]
+            frames_present = [np.full((360, 640, 3), 220, np.uint8) for _ in range(5)]
+            cv2.rectangle(frames_base[2], (200, 200), (260, 260), (0, 255, 0), 2)  # object in base
+            # remove in present to simulate missing
 
-    for idx in range(min(len(frames_base), len(frames_present))):
-        base = frames_base[idx]
-        present = align_frame(base, frames_present[idx])
-        det_a = run_detection(model, base)
-        det_b = run_detection(model, present)
-        # Fallback to ensure demo produces at least one issue
-        if not det_a:
-            h, w = base.shape[:2]
-            det_a = [{"bbox": [w//2-40, h//2-40, w//2+40, h//2+40], "cls": "pavement_defect", "conf": 0.8}]
-        total_frames += 1
+        print(f"[Job {job_id}] Loading YOLOv8 model...")
+        model = YOLO("yolov8n.pt")
 
-        # Simple matching by IoU
-        matched = set()
-        for da in det_a:
-            best, best_iou = None, 0
-            for j, dbb in enumerate(det_b):
-                if j in matched:
-                    continue
-                if da["cls"] != dbb["cls"]:
-                    continue
-                i = iou(da["bbox"], dbb["bbox"])
-                if i > best_iou:
-                    best, best_iou = (j, dbb), i
+        persist_n = settings.temporal_persist_n
+        issues_buffer = {}
+        total_frames = 0
 
-            if best_iou < 0.3:
-                change = "missing"
-                matched_db = None
-            else:
-                matched.add(best[0])
-                matched_db = best[1]
-                # For lane_marking/pavement, compute SSIM on crops to detect fading
-                change = classify_change(da, matched_db)
-                if da["cls"] in ("lane_marking", "pavement_defect"):
-                    x1, y1, x2, y2 = da["bbox"]
-                    a_gray = cv2.cvtColor(base[y1:y2, x1:x2], cv2.COLOR_BGR2GRAY)
-                    b_gray = cv2.cvtColor(present[y1:y2, x1:x2], cv2.COLOR_BGR2GRAY)
-                    try:
-                        score = ssim(a_gray, b_gray)
-                        if score < 0.6:
-                            change = "faded"
-                    except Exception:
-                        pass
+        for idx in range(min(len(frames_base), len(frames_present))):
+            base = frames_base[idx]
+            present = align_frame(base, frames_present[idx])
+            det_a = run_detection(model, base)
+            det_b = run_detection(model, present)
+            # Fallback to ensure demo produces at least one issue
+            if not det_a:
+                h, w = base.shape[:2]
+                det_a = [{"bbox": [w//2-40, h//2-40, w//2+40, h//2+40], "cls": "pavement_defect", "conf": 0.8}]
+            total_frames += 1
 
-            key = (da["cls"], tuple(da["bbox"]))
-            state = issues_buffer.get(key, {"count": 0, "first": idx, "da": da, "db": matched_db})
-            state["count"] += 1
-            state["last"] = idx
-            state["db"] = matched_db
-            state["change"] = change
-            issues_buffer[key] = state
+            # Simple matching by IoU
+            matched = set()
+            for da in det_a:
+                best, best_iou = None, 0
+                for j, dbb in enumerate(det_b):
+                    if j in matched:
+                        continue
+                    if da["cls"] != dbb["cls"]:
+                        continue
+                    i = iou(da["bbox"], dbb["bbox"])
+                    if i > best_iou:
+                        best, best_iou = (j, dbb), i
 
-    # Persist issues with temporal filter
-    for key, st in issues_buffer.items():
-        if st["count"] >= persist_n and st["change"] != "unchanged":
-            issue_id = str(uuid.uuid4())
-            da = st["da"]
-            dbb = st["db"]
-            base_bytes = crop_to_bytes(frames_base[min(st["first"], len(frames_base)-1)], da["bbox"]) 
-            present_bytes = crop_to_bytes(frames_present[min(st["first"], len(frames_present)-1)], da["bbox"]) 
-            base_key = f"jobs/{job_id}/crops/{issue_id}_base.jpg"
-            present_key = f"jobs/{job_id}/crops/{issue_id}_present.jpg"
-            put_bytes(base_key, base_bytes, "image/jpeg")
-            put_bytes(present_key, present_bytes, "image/jpeg")
+                if best_iou < 0.3:
+                    change = "missing"
+                    matched_db = None
+                else:
+                    matched.add(best[0])
+                    matched_db = best[1]
+                    # For lane_marking/pavement, compute SSIM on crops to detect fading
+                    change = classify_change(da, matched_db)
+                    if da["cls"] in ("lane_marking", "pavement_defect"):
+                        x1, y1, x2, y2 = da["bbox"]
+                        a_gray = cv2.cvtColor(base[y1:y2, x1:x2], cv2.COLOR_BGR2GRAY)
+                        b_gray = cv2.cvtColor(present[y1:y2, x1:x2], cv2.COLOR_BGR2GRAY)
+                        try:
+                            score = ssim(a_gray, b_gray)
+                            if score < 0.6:
+                                change = "faded"
+                        except Exception:
+                            pass
 
-            base_url = presign_get(base_key)
-            present_url = presign_get(present_key)
-            reason = (
-                "No matching detection found in present frames (IoU threshold = 0.3)."
-                if st["change"] == "missing"
-                else "IoU < 0.3 or mask SSIM drop indicates fading/move."
-            )
-            issue = Issue(
-                id=issue_id,
-                job_id=job_id,
-                element=da["cls"],
-                issue_type=st["change"],
-                severity="HIGH" if st["change"] in ("missing", "faded") else "MEDIUM",
-                confidence=da.get("conf", 0.5),
-                first_frame=int(st["first"]),
-                last_frame=int(st["last"]),
-                base_crop_url=base_url,
-                present_crop_url=present_url,
-                reason=reason,
-                gps=None,
-            )
-            db.add(issue)
+                key = (da["cls"], tuple(da["bbox"]))
+                state = issues_buffer.get(key, {"count": 0, "first": idx, "da": da, "db": matched_db})
+                state["count"] += 1
+                state["last"] = idx
+                state["db"] = matched_db
+                state["change"] = change
+                issues_buffer[key] = state
 
-    job.processed_frames = int(total_frames)
-    job.runtime_seconds = float(time.time() - start)
-    job.summary_json = {
-        "processed_frames": job.processed_frames,
-        "classes": list(CLASSES.values()),
-        "time_per_min_sample": round(job.runtime_seconds / max(1, total_frames) * 60, 2),
-    }
-    job.status = "completed"
-    db.commit()
-    db.close()
+        # Persist issues with temporal filter
+        for key, st in issues_buffer.items():
+            if st["count"] >= persist_n and st["change"] != "unchanged":
+                issue_id = str(uuid.uuid4())
+                da = st["da"]
+                dbb = st["db"]
+                base_bytes = crop_to_bytes(frames_base[min(st["first"], len(frames_base)-1)], da["bbox"]) 
+                present_bytes = crop_to_bytes(frames_present[min(st["first"], len(frames_present)-1)], da["bbox"]) 
+                base_key = f"jobs/{job_id}/crops/{issue_id}_base.jpg"
+                present_key = f"jobs/{job_id}/crops/{issue_id}_present.jpg"
+                put_bytes(base_key, base_bytes, "image/jpeg")
+                put_bytes(present_key, present_bytes, "image/jpeg")
 
-    return True
+                base_url = presign_get(base_key)
+                present_url = presign_get(present_key)
+                reason = (
+                    "No matching detection found in present frames (IoU threshold = 0.3)."
+                    if st["change"] == "missing"
+                    else "IoU < 0.3 or mask SSIM drop indicates fading/move."
+                )
+                issue = Issue(
+                    id=issue_id,
+                    job_id=job_id,
+                    element=da["cls"],
+                    issue_type=st["change"],
+                    severity="HIGH" if st["change"] in ("missing", "faded") else "MEDIUM",
+                    confidence=da.get("conf", 0.5),
+                    first_frame=int(st["first"]),
+                    last_frame=int(st["last"]),
+                    base_crop_url=base_url,
+                    present_crop_url=present_url,
+                    reason=reason,
+                    gps=None,
+                )
+                db.add(issue)
+
+        job.processed_frames = int(total_frames)
+        job.runtime_seconds = float(time.time() - start)
+        job.summary_json = {
+            "processed_frames": job.processed_frames,
+            "classes": list(CLASSES.values()),
+            "time_per_min_sample": round(job.runtime_seconds / max(1, total_frames) * 60, 2),
+        }
+        job.status = "completed"
+        db.commit()
+        print(f"[Job {job_id}] Completed successfully in {job.runtime_seconds:.2f}s")
+        return True
+    
+    except Exception as e:
+        print(f"[Job {job_id}] Error: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        job.status = "failed"
+        job.summary_json = {"error": str(e)}
+        db.commit()
+        return False
+    finally:
+        db.close()
 
 
 if __name__ == "__main__":

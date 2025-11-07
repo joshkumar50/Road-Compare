@@ -179,3 +179,58 @@ def report_pdf(job_id: str, db: Session = Depends(get_db)):
     return Response(content=pdf_bytes, media_type="application/pdf")
 
 
+@api_router.delete("/jobs/{job_id}")
+def delete_job(job_id: str, db: Session = Depends(get_db)):
+    """Delete a job and all associated data (issues, feedback, storage)"""
+    job = db.get(Job, job_id)
+    if not job:
+        raise HTTPException(404, "job not found")
+    
+    # Delete all issues and feedback associated with this job
+    issues = db.query(Issue).filter(Issue.job_id == job_id).all()
+    for issue in issues:
+        db.query(Feedback).filter(Feedback.issue_id == issue.id).delete()
+        db.delete(issue)
+    
+    # Delete the job
+    db.delete(job)
+    db.commit()
+    
+    # Delete storage files (best effort)
+    try:
+        from .storage import delete_prefix
+        delete_prefix(f"jobs/{job_id}/")
+    except Exception as e:
+        print(f"Warning: Could not delete storage for job {job_id}: {e}")
+    
+    return {"ok": True, "message": f"Job {job_id} and all associated data deleted"}
+
+
+@api_router.delete("/jobs")
+def delete_all_jobs(db: Session = Depends(get_db)):
+    """Delete all jobs and associated data (use with caution)"""
+    # Get all jobs
+    jobs = db.query(Job).all()
+    job_ids = [j.id for j in jobs]
+    
+    # Delete all feedback
+    db.query(Feedback).delete()
+    
+    # Delete all issues
+    db.query(Issue).delete()
+    
+    # Delete all jobs
+    db.query(Job).delete()
+    db.commit()
+    
+    # Delete storage files (best effort)
+    try:
+        from .storage import delete_prefix
+        for job_id in job_ids:
+            delete_prefix(f"jobs/{job_id}/")
+    except Exception as e:
+        print(f"Warning: Could not delete storage: {e}")
+    
+    return {"ok": True, "message": f"All {len(job_ids)} jobs deleted"}
+
+

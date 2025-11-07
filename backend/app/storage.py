@@ -71,6 +71,22 @@ def put_bytes(object_name: str, data: bytes, content_type: str = "application/oc
         client.put_object(settings.s3_bucket, object_name, data_io, length=len(data), content_type=content_type)
 
 
+def delete_prefix(prefix: str):
+    """Delete all objects with a given prefix"""
+    if USE_AWS_S3:
+        # List all objects with prefix
+        paginator = s3_client.get_paginator('list_objects_v2')
+        pages = paginator.paginate(Bucket=settings.s3_bucket, Prefix=prefix)
+        for page in pages:
+            if 'Contents' in page:
+                for obj in page['Contents']:
+                    s3_client.delete_object(Bucket=settings.s3_bucket, Key=obj['Key'])
+    else:
+        client = get_minio()
+        # List and delete objects with prefix
+        objects = client.list_objects(settings.s3_bucket, prefix=prefix, recursive=True)
+        for obj in objects:
+            client.remove_object(settings.s3_bucket, obj.object_name)
 
 
 
