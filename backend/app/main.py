@@ -83,11 +83,14 @@ def start_worker():
         traceback.print_exc()
 
 
-# Only start worker if not explicitly disabled (for local dev)
-if os.getenv("ENABLE_WORKER", "true").lower() == "true":
+# Disable background worker on Render (signal handlers don't work in threads)
+# Jobs will be processed synchronously instead
+if os.getenv("ENABLE_WORKER", "false").lower() == "true":
     worker_thread = threading.Thread(target=start_worker, daemon=True)
     worker_thread.start()
     print("✅ RQ Worker thread started")
+else:
+    print("⚠️ Background worker disabled - jobs will process synchronously")
 
 
 
