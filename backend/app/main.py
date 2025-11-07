@@ -47,28 +47,47 @@ app.include_router(api_router, prefix=settings.api_prefix)
 # Start RQ worker in background thread (free alternative to separate worker service)
 def start_worker():
     """Start RQ worker in background thread to process jobs"""
+    import time
+    # Wait for app to fully start
+    time.sleep(2)
+    
     try:
         from rq import Worker, Queue
         from redis import Redis
         
-        redis_conn = Redis.from_url(settings.redis_url)
+        print("🔄 Initializing RQ worker...")
+        redis_conn = Redis.from_url(settings.redis_url, decode_responses=True)
+        
         # Test connection
         redis_conn.ping()
         print("✅ Redis connection successful")
         
-        worker = Worker([Queue("rc-jobs", connection=redis_conn)])
-        worker.work()
+        # Create queue
+        queue = Queue("rc-jobs", connection=redis_conn)
+        print(f"✅ Queue created: {queue.name}")
+        
+        # Create and start worker
+        worker = Worker([queue], connection=redis_conn)
+        print(f"✅ Worker created: {worker.name}")
+        print("🚀 Worker starting to listen for jobs...")
+        
+        worker.work(with_scheduler=False, logging_level='INFO')
+        
     except ConnectionError as e:
         print(f"⚠️ Redis connection failed (worker disabled): {e}")
+    except AttributeError as e:
+        print(f"⚠️ Worker initialization error (check Redis version): {e}")
     except Exception as e:
-        print(f"⚠️ Worker thread error: {e}")
+        print(f"⚠️ Worker thread error: {type(e).__name__}: {e}")
+        import traceback
+        traceback.print_exc()
 
 
 # Only start worker if not explicitly disabled (for local dev)
 if os.getenv("ENABLE_WORKER", "true").lower() == "true":
     worker_thread = threading.Thread(target=start_worker, daemon=True)
     worker_thread.start()
-    print("✅ RQ Worker started in background thread")
+    print("✅ RQ Worker thread started")
 
 
 

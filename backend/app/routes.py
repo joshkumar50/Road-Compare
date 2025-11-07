@@ -36,32 +36,45 @@ async def create_job(
     metadata: str | None = None,
     db: Session = Depends(get_db),
 ):
-    job_id = str(uuid.uuid4())
-    # If direct upload provided, stream to object storage
-    if base_video and present_video:
+    try:
+        job_id = str(uuid.uuid4())
+        
+        # Validate videos are provided
+        if not base_video or not present_video:
+            raise HTTPException(400, "Both base_video and present_video are required")
+        
+        # If direct upload provided, stream to object storage
         base_key = f"jobs/{job_id}/base/{base_video.filename}"
         present_key = f"jobs/{job_id}/present/{present_video.filename}"
+        
+        print(f"📤 Uploading videos for job {job_id}")
         put_bytes(base_key, await base_video.read(), base_video.content_type or "video/mp4")
         put_bytes(present_key, await present_video.read(), present_video.content_type or "video/mp4")
-    else:
-        base_key = None
-        present_key = None
+        print(f"✅ Videos uploaded for job {job_id}")
 
-    meta_json = json.loads(metadata) if metadata else None
+        meta_json = json.loads(metadata) if metadata else {}
 
-    job = Job(id=job_id, status="queued", metadata_json=meta_json, sample_rate=sample_rate)
-    db.add(job)
-    db.commit()
+        job = Job(id=job_id, status="queued", metadata_json=meta_json, sample_rate=sample_rate)
+        db.add(job)
+        db.commit()
+        print(f"✅ Job {job_id} created in database")
 
-    enqueue_job({
-        "job_id": job_id,
-        "base_key": base_key,
-        "present_key": present_key,
-        "sample_rate": sample_rate,
-        "metadata": meta_json or {},
-    })
+        enqueue_job({
+            "job_id": job_id,
+            "base_key": base_key,
+            "present_key": present_key,
+            "sample_rate": sample_rate,
+            "metadata": meta_json,
+        })
+        print(f"✅ Job {job_id} enqueued for processing")
 
-    return {"job_id": job_id, "status": "queued"}
+        return {"job_id": job_id, "status": "queued"}
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"❌ Error creating job: {type(e).__name__}: {e}")
+        raise HTTPException(500, f"Failed to create job: {str(e)}")
 
 
 @api_router.get("/jobs", response_model=List[JobSummary])
