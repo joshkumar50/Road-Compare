@@ -14,7 +14,7 @@ from .config import settings
 
 
 def extract_frames(video_path: str, fps: int = 1, max_frames: int = 60):
-    """Extract frames from video file - 1 frame per second for accuracy"""
+    """Extract high-quality frames from video file"""
     try:
         if not os.path.exists(video_path):
             print(f"❌ Video file not found: {video_path}")
@@ -25,27 +25,53 @@ def extract_frames(video_path: str, fps: int = 1, max_frames: int = 60):
             print(f"❌ Could not open video: {video_path}")
             return []
         
+        # Set video capture to highest quality
+        cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1920)
+        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 1080)
+        
         video_fps = cap.get(cv2.CAP_PROP_FPS) or 30
         total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-        duration = total_frames / video_fps
+        duration = total_frames / video_fps if video_fps > 0 else 0
         
         print(f"📹 Video: {duration:.1f}s, {video_fps:.1f} FPS, {total_frames} frames")
         
-        # Extract 1 frame per second for maximum accuracy
+        # Calculate interval for extracting frames
         interval = max(int(round(video_fps / fps)), 1)
         
         frames = []
         idx = 0
-        while len(frames) < max_frames:
+        frame_count = 0
+        
+        while cap.isOpened() and len(frames) < max_frames:
             ret, frame = cap.read()
             if not ret:
                 break
+            
+            # Extract frame at interval
             if idx % interval == 0:
-                frames.append(frame)
+                # Ensure frame is in full color
+                if len(frame.shape) == 2:
+                    frame = cv2.cvtColor(frame, cv2.COLOR_GRAY2BGR)
+                
+                # Apply denoising for clearer frames
+                denoised = cv2.fastNlMeansDenoisingColored(frame, None, 10, 10, 7, 21)
+                
+                # Enhance contrast
+                lab = cv2.cvtColor(denoised, cv2.COLOR_BGR2LAB)
+                l, a, b = cv2.split(lab)
+                clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8,8))
+                l = clahe.apply(l)
+                enhanced = cv2.merge([l, a, b])
+                enhanced = cv2.cvtColor(enhanced, cv2.COLOR_LAB2BGR)
+                
+                frames.append(enhanced)
+                frame_count += 1
+                print(f"  Frame {frame_count}/{max_frames} extracted (timestamp: {idx/video_fps:.1f}s)")
+            
             idx += 1
         
         cap.release()
-        print(f"✅ Extracted {len(frames)} frames")
+        print(f"✅ Extracted {len(frames)} high-quality frames")
         return frames
     except Exception as e:
         print(f"❌ Error extracting frames: {e}")
@@ -291,22 +317,70 @@ def compare_detections(base_det, present_det, base_frame=None, present_frame=Non
     return issues
 
 
-def frame_to_base64(frame):
-    """Convert OpenCV frame to base64 data URL"""
-    _, buffer = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 85])
+def frame_to_base64(frame, quality=90):
+    """Convert OpenCV frame to high-quality base64 data URL"""
+    # Ensure frame is in good quality
+    if len(frame.shape) == 2:  # Grayscale
+        frame = cv2.cvtColor(frame, cv2.COLOR_GRAY2BGR)
+    
+    # Encode with higher quality
+    encode_params = [cv2.IMWRITE_JPEG_QUALITY, quality]
+    _, buffer = cv2.imencode('.jpg', frame, encode_params)
     img_base64 = base64.b64encode(buffer).decode('utf-8')
     return f"data:image/jpeg;base64,{img_base64}"
 
 
-def crop_and_encode(frame, bbox):
-    """Crop frame and encode to base64"""
-    x1, y1, x2, y2 = bbox
+def crop_and_encode(frame, bbox, expand_factor=1.5):
+    """Crop region from frame with expansion for context"""
+    x1, y1, x2, y2 = map(int, bbox)
     h, w = frame.shape[:2]
-    x1, y1 = max(0, x1), max(0, y1)
-    x2, y2 = min(w, x2), min(h, y2)
     
-    crop = frame[y1:y2, x1:x2]
-    return frame_to_base64(crop)
+    # Expand the bbox to show more context
+    cx, cy = (x1 + x2) // 2, (y1 + y2) // 2
+    width, height = x2 - x1, y2 - y1
+    
+    # Expand by factor to show surrounding area
+    new_width = int(width * expand_factor)
+    new_height = int(height * expand_factor)
+    
+    # Calculate new boundaries with expansion
+    x1 = max(0, cx - new_width // 2)
+    y1 = max(0, cy - new_height // 2)
+    x2 = min(w, cx + new_width // 2)
+    y2 = min(h, cy + new_height // 2)
+    
+    # Ensure minimum size for visibility
+    min_size = 200
+    if x2 - x1 < min_size:
+        x1 = max(0, cx - min_size // 2)
+        x2 = min(w, cx + min_size // 2)
+    if y2 - y1 < min_size:
+        y1 = max(0, cy - min_size // 2)
+        y2 = min(h, cy + min_size // 2)
+    
+    # Extract crop
+    crop = frame[y1:y2, x1:x2].copy()
+    
+    # Apply sharpening for clarity
+    kernel = np.array([[-1,-1,-1],
+                       [-1, 9,-1],
+                       [-1,-1,-1]])
+    sharpened = cv2.filter2D(crop, -1, kernel)
+    
+    # Draw a red rectangle to highlight the detection area within the expanded crop
+    relative_x1 = max(0, bbox[0] - x1)
+    relative_y1 = max(0, bbox[1] - y1)
+    relative_x2 = min(x2 - x1, bbox[2] - x1)
+    relative_y2 = min(y2 - y1, bbox[3] - y1)
+    
+    # Draw rectangle on the issue area (if within bounds)
+    if relative_x2 > relative_x1 and relative_y2 > relative_y1:
+        cv2.rectangle(sharpened, 
+                      (relative_x1, relative_y1), 
+                      (relative_x2, relative_y2), 
+                      (0, 0, 255), 2)  # Red rectangle, 2px thick
+    
+    return frame_to_base64(sharpened, quality=95)
 
 
 def run_pipeline(job_id: str, payload: dict):
