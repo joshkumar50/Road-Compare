@@ -52,10 +52,16 @@ def start_worker():
         from redis import Redis
         
         redis_conn = Redis.from_url(settings.redis_url)
+        # Test connection
+        redis_conn.ping()
+        print("✅ Redis connection successful")
+        
         worker = Worker([Queue("rc-jobs", connection=redis_conn)])
         worker.work()
+    except ConnectionError as e:
+        print(f"⚠️ Redis connection failed (worker disabled): {e}")
     except Exception as e:
-        print(f"Worker thread error: {e}")
+        print(f"⚠️ Worker thread error: {e}")
 
 
 # Only start worker if not explicitly disabled (for local dev)
