@@ -17,14 +17,6 @@ services:
           name: roadcompare-redis
           type: redis
           property: connectionString
-      - key: S3_ENDPOINT
-        value: https://s3.amazonaws.com
-      - key: S3_BUCKET
-        value: roadcompare-storage
-      - key: S3_REGION
-        value: us-east-1
-      - key: S3_SECURE
-        value: true
       - key: SECRET_KEY
         generateValue: true
       - key: API_PREFIX
