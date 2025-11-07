@@ -19,6 +19,13 @@ class Settings(BaseModel):
     s3_secure: bool = os.getenv("S3_SECURE", "false").lower() == "true"
 
     frontend_url: str = os.getenv("FRONTEND_URL", "http://localhost:5173")
+    
+    # CORS origins - support multiple origins for flexibility
+    cors_origins: list = (
+        os.getenv("CORS_ORIGINS", "http://localhost:5173").split(",")
+        if os.getenv("CORS_ORIGINS")
+        else ["http://localhost:5173"]
+    )
 
     frame_rate: int = int(os.getenv("FRAME_RATE", "1"))
     temporal_persist_n: int = int(os.getenv("TEMPORAL_PERSIST_N", "3"))

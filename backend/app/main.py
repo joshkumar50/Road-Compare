@@ -8,11 +8,13 @@ import os
 
 app = FastAPI(title="RoadCompare API", version="1.0.0")
 
-# Build allowed origins list - support multiple origins if needed
-allowed_origins = [settings.frontend_url]
-# Allow additional origins from environment variable (comma-separated)
-if os.getenv("CORS_ORIGINS"):
-    allowed_origins.extend([origin.strip() for origin in os.getenv("CORS_ORIGINS").split(",")])
+# Build allowed origins list from config
+allowed_origins = [origin.strip() for origin in settings.cors_origins]
+# Always include frontend_url
+if settings.frontend_url not in allowed_origins:
+    allowed_origins.insert(0, settings.frontend_url)
+
+print(f"✅ CORS allowed origins: {allowed_origins}")
 
 app.add_middleware(
     CORSMiddleware,
