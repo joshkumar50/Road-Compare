@@ -7,8 +7,10 @@ from .db import SessionLocal
 from .models import Job, Issue
 from .config import settings
 from .storage import presign_get, put_bytes
-from ultralytics import YOLO
-from skimage.metrics import structural_similarity as ssim
+
+# Lazy imports for heavy dependencies (only load when needed)
+# from ultralytics import YOLO
+# from skimage.metrics import structural_similarity as ssim
 
 
 CLASSES = {
@@ -60,7 +62,7 @@ def align_frame(base: np.ndarray, present: np.ndarray) -> np.ndarray:
     return aligned
 
 
-def run_detection(model: YOLO, frame: np.ndarray):
+def run_detection(model, frame: np.ndarray):
     results = model.predict(frame, imgsz=640, conf=settings.confidence_threshold, verbose=False)[0]
     outs = []
     for b in results.boxes:
@@ -258,6 +260,7 @@ def run_pipeline(job_id: str, payload: dict):
             # remove in present to simulate missing
 
         print(f"[Job {job_id}] Loading YOLOv8 model...")
+        from ultralytics import YOLO
         model = YOLO("yolov8n.pt")
         print(f"[Job {job_id}] Model loaded successfully")
 
@@ -302,6 +305,7 @@ def run_pipeline(job_id: str, payload: dict):
                         a_gray = cv2.cvtColor(base[y1:y2, x1:x2], cv2.COLOR_BGR2GRAY)
                         b_gray = cv2.cvtColor(present[y1:y2, x1:x2], cv2.COLOR_BGR2GRAY)
                         try:
+                            from skimage.metrics import structural_similarity as ssim
                             score = ssim(a_gray, b_gray)
                             if score < 0.6:
                                 change = "faded"
