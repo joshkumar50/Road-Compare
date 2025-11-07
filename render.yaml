@@ -32,7 +32,7 @@ services:
       - key: CONFIDENCE_THRESHOLD
         value: 0.25
       - key: DEMO_MODE
-        value: true
+        value: false
       - key: ENABLE_WORKER
         value: false
       - key: BACKEND_URL
