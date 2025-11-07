@@ -30,7 +30,7 @@ services:
       - key: API_PREFIX
         value: /api/v1
       - key: FRONTEND_URL
-        value: https://road-compare.vercel.app
+        value: https://roadcompare.vercel.app
       - key: FRAME_RATE
         value: 1
       - key: TEMPORAL_PERSIST_N
