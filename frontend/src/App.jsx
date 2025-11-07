@@ -104,9 +104,13 @@ function Jobs({ refreshTrigger }) {
 
   useEffect(() => {
     fetchJobs()
-    const iv = setInterval(fetchJobs, 1500)
+    // Only poll if there are processing jobs
+    const hasProcessing = jobs.some(j => j.status === 'processing' || j.status === 'queued')
+    if (!hasProcessing) return
+    
+    const iv = setInterval(fetchJobs, 5000) // Reduced frequency to 5 seconds
     return () => clearInterval(iv)
-  }, [refreshTrigger])
+  }, [refreshTrigger, jobs])
 
   const deleteJob = async (jobId, e) => {
     e.preventDefault()
@@ -203,9 +207,12 @@ function JobViewer({jobId}) {
       }
     }
     fetchData()
-    const iv = setInterval(fetchData, 2000)
-    return () => clearInterval(iv)
-  }, [jobId])
+    // Only poll if job is still processing
+    if (data?.summary?.status === 'processing' || data?.summary?.status === 'queued') {
+      const iv = setInterval(fetchData, 5000)
+      return () => clearInterval(iv)
+    }
+  }, [jobId, data?.summary?.status])
 
   if (loading) return <div className="card mt-4 text-center py-8">⏳ Loading results...</div>
   if (!data) return <div className="card mt-4 text-center py-8">❌ Failed to load results</div>

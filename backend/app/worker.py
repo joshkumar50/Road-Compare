@@ -2,6 +2,7 @@ import time
 import uuid
 import json
 import base64
+import os
 from io import BytesIO
 import cv2
 import numpy as np
@@ -12,14 +13,25 @@ from .models import Job, Issue
 from .config import settings
 
 
-def extract_frames(video_path: str, fps: int = 1, max_frames: int = 30):
-    """Extract frames from video file"""
+def extract_frames(video_path: str, fps: int = 1, max_frames: int = 60):
+    """Extract frames from video file - 1 frame per second for accuracy"""
     try:
+        if not os.path.exists(video_path):
+            print(f"❌ Video file not found: {video_path}")
+            return []
+            
         cap = cv2.VideoCapture(video_path)
         if not cap.isOpened():
+            print(f"❌ Could not open video: {video_path}")
             return []
         
         video_fps = cap.get(cv2.CAP_PROP_FPS) or 30
+        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        duration = total_frames / video_fps
+        
+        print(f"📹 Video: {duration:.1f}s, {video_fps:.1f} FPS, {total_frames} frames")
+        
+        # Extract 1 frame per second for maximum accuracy
         interval = max(int(round(video_fps / fps)), 1)
         
         frames = []
@@ -33,9 +45,12 @@ def extract_frames(video_path: str, fps: int = 1, max_frames: int = 30):
             idx += 1
         
         cap.release()
+        print(f"✅ Extracted {len(frames)} frames")
         return frames
     except Exception as e:
-        print(f"Error extracting frames: {e}")
+        print(f"❌ Error extracting frames: {e}")
+        import traceback
+        traceback.print_exc()
         return []
 
 
@@ -189,9 +204,9 @@ def run_pipeline(job_id: str, payload: dict):
         
         print(f"[Job {job_id}] Extracting frames from videos...")
         
-        # Extract frames
-        base_frames = extract_frames(base_path, fps=1, max_frames=30)
-        present_frames = extract_frames(present_path, fps=1, max_frames=30)
+        # Extract frames - 1 per second for maximum accuracy
+        base_frames = extract_frames(base_path, fps=1, max_frames=60)
+        present_frames = extract_frames(present_path, fps=1, max_frames=60)
         
         if not base_frames or not present_frames:
             print(f"[Job {job_id}] Could not extract frames, using demo mode")
