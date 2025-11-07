@@ -86,7 +86,11 @@ def detect_road_elements(frame):
         elif 0.3 < position_y < 0.7 and aspect_ratio < 0.5 and ch > h*0.15:
             element_type = "divider"
             
-        # 4. POTHOLES/CRACKS (bottom area, irregular)
+        # 4. GUARDRAILS (side barriers, horizontal, middle height)
+        elif 0.4 < position_y < 0.7 and aspect_ratio > 2 and cw > w*0.3:
+            element_type = "guardrail"
+            
+        # 5. POTHOLES/CRACKS (bottom area, irregular)
         elif position_y > 0.5 and area > 1500:
             element_type = "pothole"
         
@@ -111,6 +115,8 @@ def get_safety_issue_reason(element_type, issue_type, base_frame, present_frame,
             return "⚠️ WARNING: Lane marking (side/middle line) is missing or completely faded"
         elif element_type == "divider":
             return "⚠️ CRITICAL: Road divider is missing or broken - safety hazard"
+        elif element_type == "guardrail":
+            return "⚠️ CRITICAL: Guardrail is missing - high risk of vehicle accidents"
         elif element_type == "pothole":
             return "⚠️ NOTICE: New pothole or pavement damage detected"
         else:
@@ -121,6 +127,8 @@ def get_safety_issue_reason(element_type, issue_type, base_frame, present_frame,
             return "⚠️ WARNING: Sign board position has changed - verify correct placement"
         elif element_type == "divider":
             return "⚠️ WARNING: Divider position shifted - possible structural damage"
+        elif element_type == "guardrail":
+            return "⚠️ WARNING: Guardrail displaced - check structural integrity"
         else:
             return f"⚠️ NOTICE: {element_type.replace('_', ' ').title()} position changed"
     
@@ -131,6 +139,8 @@ def get_safety_issue_reason(element_type, issue_type, base_frame, present_frame,
             return "⚠️ NOTICE: Lane marking is faded - repainting recommended"
         elif element_type == "divider":
             return "⚠️ WARNING: Divider shows damage - inspection required"
+        elif element_type == "guardrail":
+            return "⚠️ WARNING: Guardrail damaged - repair needed to prevent accidents"
         else:
             return f"⚠️ NOTICE: {element_type.replace('_', ' ').title()} shows damage"
     
