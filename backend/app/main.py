@@ -14,6 +14,17 @@ allowed_origins = [origin.strip() for origin in settings.cors_origins]
 if settings.frontend_url not in allowed_origins:
     allowed_origins.insert(0, settings.frontend_url)
 
+# Add both Vercel domain variations
+allowed_origins.extend([
+    "https://roadcompare.vercel.app",
+    "https://road-compare.vercel.app",
+    "http://localhost:5173",
+    "http://localhost:3000"
+])
+
+# Remove duplicates
+allowed_origins = list(set(allowed_origins))
+
 print(f"✅ CORS allowed origins: {allowed_origins}")
 
 app.add_middleware(
