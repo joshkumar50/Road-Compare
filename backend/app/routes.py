@@ -8,7 +8,7 @@ from .tasks import enqueue_job
 from .db import get_db, Base, engine
 from .models import Job, Issue, Feedback
 from .config import settings
-from .storage import presign_put, presign_get, put_bytes, STORAGE_DIR, USE_LOCAL_STORAGE
+from .storage_simple import presign_put, presign_get, put_bytes, USE_LOCAL_STORAGE
 import uuid
 import csv
 import io
@@ -28,26 +28,6 @@ def presign_upload(data: PresignRequest):
     return PresignResponse(
         base_url=presign_put(base_key), present_url=presign_put(present_key), job_id=job_id
     )
-
-
-@api_router.get("/storage/{file_path:path}")
-async def serve_local_storage(file_path: str):
-    """Serve files from local storage (only when using local storage mode)"""
-    if not USE_LOCAL_STORAGE:
-        raise HTTPException(404, "Local storage not enabled")
-    
-    full_path = STORAGE_DIR / file_path
-    
-    if not full_path.exists():
-        raise HTTPException(404, f"File not found: {file_path}")
-    
-    # Security check: ensure path is within STORAGE_DIR
-    try:
-        full_path.resolve().relative_to(STORAGE_DIR.resolve())
-    except ValueError:
-        raise HTTPException(403, "Access denied")
-    
-    return FileResponse(full_path)
 
 
 @api_router.post("/jobs")
@@ -231,12 +211,8 @@ def delete_job(job_id: str, db: Session = Depends(get_db)):
     db.delete(job)
     db.commit()
     
-    # Delete storage files (best effort)
-    try:
-        from .storage import delete_prefix
-        delete_prefix(f"jobs/{job_id}/")
-    except Exception as e:
-        print(f"Warning: Could not delete storage for job {job_id}: {e}")
+    # Delete storage files (best effort) - no longer needed with base64 data URLs
+    pass
     
     return {"ok": True, "message": f"Job {job_id} and all associated data deleted"}
 
@@ -258,13 +234,8 @@ def delete_all_jobs(db: Session = Depends(get_db)):
     db.query(Job).delete()
     db.commit()
     
-    # Delete storage files (best effort)
-    try:
-        from .storage import delete_prefix
-        for job_id in job_ids:
-            delete_prefix(f"jobs/{job_id}/")
-    except Exception as e:
-        print(f"Warning: Could not delete storage: {e}")
+    # Delete storage files (best effort) - no longer needed with base64 data URLs
+    pass
     
     return {"ok": True, "message": f"All {len(job_ids)} jobs deleted"}
 
