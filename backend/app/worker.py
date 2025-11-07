@@ -55,53 +55,118 @@ def extract_frames(video_path: str, fps: int = 1, max_frames: int = 60):
 
 
 def detect_road_elements(frame):
-    """Detect critical road safety elements: signs, lane markings, dividers"""
+    """Detect critical road safety elements with improved accuracy"""
+    h, w = frame.shape[:2]
     gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-    edges = cv2.Canny(gray, 50, 150)
-    contours, _ = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    
+    # Apply bilateral filter to reduce noise while preserving edges
+    filtered = cv2.bilateralFilter(gray, 9, 75, 75)
+    
+    # Adaptive thresholding for better detection in varying lighting
+    thresh = cv2.adaptiveThreshold(filtered, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, 
+                                   cv2.THRESH_BINARY_INV, 11, 2)
+    
+    # Morphological operations to clean up
+    kernel = np.ones((3,3), np.uint8)
+    morph = cv2.morphologyEx(thresh, cv2.MORPH_CLOSE, kernel, iterations=2)
+    
+    # Find contours
+    contours, _ = cv2.findContours(morph, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     
     detections = []
-    h, w = frame.shape[:2]
     
     for cnt in contours:
         area = cv2.contourArea(cnt)
-        if area < 500:  # Skip small noise
+        if area < 800:  # Increased minimum area to reduce false positives
             continue
             
         x, y, cw, ch = cv2.boundingRect(cnt)
+        
+        # Calculate properties
         aspect_ratio = float(cw) / ch if ch > 0 else 0
         position_y = (y + ch/2) / h
+        position_x = (x + cw/2) / w
+        
+        # Calculate solidity (area / bounding box area) - helps identify solid shapes
+        hull = cv2.convexHull(cnt)
+        hull_area = cv2.contourArea(hull)
+        solidity = area / hull_area if hull_area > 0 else 0
+        
+        # Get color information from the region
+        roi = frame[y:y+ch, x:x+cw]
+        if roi.size == 0:
+            continue
+        avg_color = np.mean(roi, axis=(0,1))  # BGR
         
         element_type = None
+        confidence = 0.5
         
-        # 1. SIGN BOARDS (top area, square-ish shape)
-        if position_y < 0.4 and 0.7 < aspect_ratio < 1.5 and area > 800:
-            element_type = "sign_board"
+        # 1. SIGN BOARDS - Solid, geometric shapes in upper area, often bright colors
+        if (position_y < 0.45 and  # Upper half
+            0.6 < aspect_ratio < 1.8 and  # Roughly square/rectangular
+            solidity > 0.75 and  # Solid shape (not irregular)
+            area > 1200 and area < w*h*0.15 and  # Reasonable size
+            cw < w*0.4 and ch < h*0.4):  # Not too large
             
-        # 2. LANE MARKINGS - Side/Middle Lines (bottom area, horizontal)
-        elif position_y > 0.6 and aspect_ratio > 3 and cw > w*0.2:
-            element_type = "lane_marking"
+            # Check for bright/saturated colors (signs are usually colorful)
+            brightness = np.mean(avg_color)
+            if brightness > 80:  # Reasonably bright
+                element_type = "sign_board"
+                confidence = min(0.75 + (solidity * 0.2), 0.95)
             
-        # 3. DIVIDERS (middle area, vertical)
-        elif 0.3 < position_y < 0.7 and aspect_ratio < 0.5 and ch > h*0.15:
+        # 2. LANE MARKINGS - Horizontal lines at bottom, usually white/yellow
+        elif (position_y > 0.65 and  # Bottom third
+              aspect_ratio > 4 and  # Very horizontal
+              cw > w*0.25 and  # Spans significant width
+              ch < h*0.1 and  # Thin
+              area > 1000):
+            
+            # Check for light color (white/yellow markings)
+            brightness = np.mean(avg_color)
+            if brightness > 120:  # Bright (white/yellow)
+                element_type = "lane_marking"
+                confidence = min(0.7 + (aspect_ratio / 20), 0.92)
+            
+        # 3. DIVIDERS - Vertical structures in middle area
+        elif (0.35 < position_y < 0.7 and  # Middle area
+              aspect_ratio < 0.4 and  # Tall and thin
+              ch > h*0.2 and  # Significant height
+              area > 1500):
+            
             element_type = "divider"
+            confidence = min(0.68 + (ch / h), 0.88)
             
-        # 4. GUARDRAILS (side barriers, horizontal, middle height)
-        elif 0.4 < position_y < 0.7 and aspect_ratio > 2 and cw > w*0.3:
+        # 4. GUARDRAILS - Horizontal barriers at middle height
+        elif (0.4 < position_y < 0.65 and  # Middle height
+              aspect_ratio > 2.5 and  # Horizontal
+              cw > w*0.35 and  # Spans width
+              area > 2000):
+            
             element_type = "guardrail"
+            confidence = min(0.65 + (cw / w), 0.87)
             
-        # 5. POTHOLES/CRACKS (bottom area, irregular)
-        elif position_y > 0.5 and area > 1500:
-            element_type = "pothole"
+        # 5. POTHOLES - Dark irregular patches on road surface (bottom area)
+        elif (position_y > 0.6 and  # Road surface area
+              0.5 < aspect_ratio < 2.5 and  # Not too elongated
+              solidity < 0.8 and  # Irregular shape
+              area > 2500):  # Significant size
+            
+            # Check for darker color (potholes are usually dark)
+            brightness = np.mean(avg_color)
+            if brightness < 100:  # Darker than surroundings
+                element_type = "pothole"
+                confidence = min(0.6 + (area / 20000), 0.82)
         
         if element_type:
             detections.append({
                 "bbox": [x, y, x + cw, y + ch],
                 "element": element_type,
-                "confidence": min(0.65 + (area / 10000), 0.95)
+                "confidence": confidence
             })
     
-    return detections[:12]
+    # Sort by confidence and return top detections
+    detections.sort(key=lambda x: x['confidence'], reverse=True)
+    return detections[:10]  # Reduced to top 10 most confident
 
 
 def get_safety_issue_reason(element_type, issue_type, base_frame, present_frame, bbox):
