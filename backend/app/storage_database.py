@@ -16,6 +16,7 @@ from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, Session
 from pymongo import MongoClient
 from gridfs import GridFS
+from bson import ObjectId
 import psycopg2
 from .config import settings
 
@@ -53,12 +54,21 @@ class StorageManager:
         
         if settings.mongo_uri and settings.mongo_uri != "mongodb://localhost:27017/":
             try:
-                self.mongo_client = MongoClient(settings.mongo_uri)
+                # Connect with serverSelectionTimeoutMS for faster failure detection
+                self.mongo_client = MongoClient(
+                    settings.mongo_uri,
+                    serverSelectionTimeoutMS=5000,
+                    connectTimeoutMS=5000
+                )
+                # Test connection
+                self.mongo_client.admin.command('ping')
                 self.mongo_db = self.mongo_client[settings.mongo_db]
                 self.gridfs = GridFS(self.mongo_db)
-                logger.info("✅ MongoDB GridFS connected for large file storage")
+                logger.info(f"✅ MongoDB Atlas GridFS connected: {settings.mongo_db}")
             except Exception as e:
-                logger.warning(f"MongoDB not available, using PostgreSQL only: {e}")
+                logger.warning(f"⚠️ MongoDB not available, using PostgreSQL only: {e}")
+                self.mongo_client = None
+                self.gridfs = None
     
     def put_video(self, key: str, data: bytes, content_type: str = "video/mp4") -> str:
         """Store video in database"""
@@ -135,8 +145,15 @@ class StorageManager:
                 # Retrieve from MongoDB
                 gridfs_id = metadata.get("gridfs_id")
                 if gridfs_id:
-                    file_data = self.gridfs.get(gridfs_id)
-                    return file_data.read()
+                    try:
+                        # Convert string ID to ObjectId if needed
+                        if isinstance(gridfs_id, str):
+                            gridfs_id = ObjectId(gridfs_id)
+                        file_data = self.gridfs.get(gridfs_id)
+                        return file_data.read()
+                    except Exception as e:
+                        logger.error(f"Error retrieving from MongoDB GridFS: {e}")
+                        # Fall through to PostgreSQL backup
             
             # Retrieve from PostgreSQL
             if video.data:
@@ -188,7 +205,13 @@ class StorageManager:
             if metadata.get("storage") == "mongodb" and self.gridfs:
                 gridfs_id = metadata.get("gridfs_id")
                 if gridfs_id:
-                    self.gridfs.delete(gridfs_id)
+                    try:
+                        # Convert string ID to ObjectId if needed
+                        if isinstance(gridfs_id, str):
+                            gridfs_id = ObjectId(gridfs_id)
+                        self.gridfs.delete(gridfs_id)
+                    except Exception as e:
+                        logger.warning(f"Error deleting from MongoDB GridFS: {e}")
             
             # Delete from PostgreSQL
             db.delete(video)
