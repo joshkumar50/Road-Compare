@@ -39,6 +39,8 @@ async def startup_event():
         redis_conn = Redis.from_url(settings.redis_url, socket_connect_timeout=2)
         redis_conn.ping()
         logger.info("✅ Redis connection successful")
+    except ImportError:
+        logger.warning("⚠️ Redis module not available - background worker disabled")
     except Exception as e:
         logger.warning(f"⚠️ Redis connection failed (non-critical): {e}")
     
@@ -93,13 +95,36 @@ def root():
 
 @app.get("/health")
 def health():
-    """Health check endpoint"""
-    return {
+    """Health check endpoint with actual connection testing"""
+    from datetime import datetime
+    health_status = {
         "status": "ok",
         "service": "roadcompare-api",
-        "database": "connected",
-        "redis": "connected"
+        "timestamp": datetime.utcnow().isoformat() + "Z"
     }
+    
+    # Test database connection
+    try:
+        from .db import engine
+        from sqlalchemy import text
+        with engine.connect() as conn:
+            conn.execute(text("SELECT 1"))
+        health_status["database"] = "connected"
+    except Exception as e:
+        health_status["database"] = f"error: {str(e)}"
+        health_status["status"] = "degraded"
+    
+    # Test Redis connection
+    try:
+        from redis import Redis
+        redis_conn = Redis.from_url(settings.redis_url, socket_connect_timeout=2)
+        redis_conn.ping()
+        health_status["redis"] = "connected"
+    except Exception as e:
+        health_status["redis"] = f"warning: {str(e)}"
+        # Redis failure is non-critical for basic functionality
+    
+    return health_status
 
 
 app.include_router(api_router, prefix=settings.api_prefix)
@@ -134,6 +159,8 @@ def start_worker():
         
         worker.work(with_scheduler=False, logging_level='INFO')
         
+    except ImportError as e:
+        print(f"⚠️ Required modules not available (worker disabled): {e}")
     except ConnectionError as e:
         print(f"⚠️ Redis connection failed (worker disabled): {e}")
     except AttributeError as e:

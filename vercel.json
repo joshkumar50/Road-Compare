@@ -1,10 +1,9 @@
 {
-  "version": 2,
-  "buildCommand": "npm run build",
-  "outputDirectory": "dist",
-  "installCommand": "npm install",
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "buildCommand": "cd frontend && npm run build",
+  "outputDirectory": "frontend/dist",
+  "installCommand": "cd frontend && npm install",
   "framework": "vite",
-  "rootDirectory": "frontend",
   "env": {
     "VITE_API": "https://roadcompare-api.onrender.com/api/v1"
   },
