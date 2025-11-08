@@ -188,16 +188,64 @@ def feedback(issue_id: str, data: FeedbackIn, db: Session = Depends(get_db)):
 
 @api_router.get("/jobs/{job_id}/report.pdf")
 def report_pdf(job_id: str, db: Session = Depends(get_db)):
+    """Generate PDF or HTML report for job"""
     from .pdf import generate_pdf
-
-    job = db.get(Job, job_id)
-    if not job:
-        raise HTTPException(404, "job not found")
-    issues = db.query(Issue).filter(Issue.job_id == job_id).all()
-    pdf_bytes = generate_pdf(job, issues)
     from fastapi.responses import Response
-
-    return Response(content=pdf_bytes, media_type="application/pdf")
+    
+    try:
+        job = db.get(Job, job_id)
+        if not job:
+            raise HTTPException(404, "Job not found")
+        
+        issues = db.query(Issue).filter(Issue.job_id == job_id).all()
+        
+        if not issues:
+            # Return simple message if no issues
+            html = f"""
+            <html>
+            <body style="font-family: Arial; padding: 40px;">
+                <h1>RoadCompare Report</h1>
+                <p>Job ID: {job_id}</p>
+                <p>Status: {job.status}</p>
+                <p>No issues detected in this analysis.</p>
+            </body>
+            </html>
+            """
+            return Response(content=html.encode('utf-8'), media_type="text/html")
+        
+        # Generate report (PDF or HTML)
+        report_bytes = generate_pdf(job, issues)
+        
+        # Check if it's PDF or HTML based on first bytes
+        if report_bytes.startswith(b'%PDF'):
+            # It's a PDF
+            return Response(
+                content=report_bytes, 
+                media_type="application/pdf",
+                headers={"Content-Disposition": f"attachment; filename=report_{job_id}.pdf"}
+            )
+        else:
+            # It's HTML (fallback)
+            return Response(
+                content=report_bytes, 
+                media_type="text/html; charset=utf-8",
+                headers={"Content-Disposition": f"inline; filename=report_{job_id}.html"}
+            )
+            
+    except Exception as e:
+        print(f"Error generating report: {e}")
+        # Return error page
+        error_html = f"""
+        <html>
+        <body style="font-family: Arial; padding: 40px;">
+            <h1>Report Generation Error</h1>
+            <p>Unable to generate report for job {job_id}</p>
+            <p>Error: {str(e)}</p>
+            <p><a href="/api/v1/jobs">Back to Jobs</a></p>
+        </body>
+        </html>
+        """
+        return Response(content=error_html.encode('utf-8'), media_type="text/html", status_code=500)
 
 
 @api_router.get("/storage/stats")

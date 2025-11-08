@@ -1,6 +1,14 @@
-from weasyprint import HTML
 from jinja2 import Template
+from datetime import datetime
 from .models import Job, Issue
+
+# Try to import WeasyPrint, but don't fail if not available
+try:
+    from weasyprint import HTML
+    WEASYPRINT_AVAILABLE = True
+except ImportError:
+    WEASYPRINT_AVAILABLE = False
+    print("⚠️ WeasyPrint not available, using HTML fallback for reports")
 
 
 TEMPLATE = Template(
@@ -106,11 +114,18 @@ TEMPLATE = Template(
 
 
 def generate_pdf(job: Job, issues: list[Issue]) -> bytes:
+    """Generate PDF report with better error handling"""
     try:
-        # Process images - resize base64 images if too large
+        # Check if WeasyPrint is available
+        try:
+            from weasyprint import HTML
+        except ImportError:
+            # Fallback to simple HTML if WeasyPrint not available
+            return generate_simple_html_report(job, issues)
+        
+        # Process issues for PDF (no images to avoid size issues)
         processed_issues = []
-        for issue in issues[:10]:  # Limit to top 10
-            # Create a copy of the issue data
+        for issue in issues[:20]:  # Limit to top 20
             issue_dict = {
                 'id': issue.id,
                 'element': issue.element,
@@ -118,9 +133,8 @@ def generate_pdf(job: Job, issues: list[Issue]) -> bytes:
                 'severity': issue.severity,
                 'confidence': issue.confidence,
                 'first_frame': issue.first_frame,
-                'reason': issue.reason,
-                'base_crop_url': issue.base_crop_url[:500] + '...' if len(issue.base_crop_url) > 500 else issue.base_crop_url,
-                'present_crop_url': issue.present_crop_url[:500] + '...' if len(issue.present_crop_url) > 500 else issue.present_crop_url
+                'last_frame': issue.last_frame if hasattr(issue, 'last_frame') else issue.first_frame,
+                'reason': issue.reason
             }
             processed_issues.append(issue_dict)
         
@@ -214,21 +228,132 @@ def generate_pdf(job: Job, issues: list[Issue]) -> bytes:
         from jinja2 import Template
         from datetime import datetime
         template = Template(simple_template)
-        html = template.render(job=job, issues=issues, datetime=datetime)
-        return HTML(string=html).write_pdf()
+        html = template.render(job=job, issues=processed_issues, datetime=datetime)
+        
+        # Try to generate PDF
+        pdf_bytes = HTML(string=html).write_pdf()
+        print(f"✅ PDF generated successfully for job {job.id}")
+        return pdf_bytes
         
     except Exception as e:
-        print(f"PDF generation error: {e}")
+        print(f"❌ PDF generation error: {e}")
         import traceback
         traceback.print_exc()
-        # Ultra simple fallback
-        fallback = f"""<!doctype html><html><body>
-        <h1>RoadCompare Report</h1>
-        <p>Job: {job.id}</p>
-        <p>Issues Found: {len(issues)}</p>
-        <ul>{''.join(f'<li>{i.element} - {i.issue_type} ({i.severity})</li>' for i in issues[:10])}</ul>
-        </body></html>"""
-        return HTML(string=fallback).write_pdf()
+        
+        # Return simple HTML as bytes if PDF fails
+        return generate_simple_html_report(job, issues)
+
+
+def generate_simple_html_report(job: Job, issues: list[Issue]) -> bytes:
+    """Generate simple HTML report as fallback"""
+    html_content = f"""
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <meta charset="UTF-8">
+        <title>RoadCompare Report - {job.id}</title>
+        <style>
+            body {{ font-family: Arial, sans-serif; margin: 20px; line-height: 1.6; }}
+            h1 {{ color: #0F172A; border-bottom: 3px solid #0EA5A4; padding-bottom: 10px; }}
+            .header {{ background: #f8f9fa; padding: 20px; border-radius: 8px; margin-bottom: 20px; }}
+            .stats {{ display: flex; gap: 20px; margin: 20px 0; }}
+            .stat {{ background: white; padding: 15px; border: 1px solid #ddd; border-radius: 4px; }}
+            .HIGH {{ color: #dc2626; font-weight: bold; }}
+            .MEDIUM {{ color: #f59e0b; font-weight: bold; }}
+            .LOW {{ color: #10b981; }}
+            table {{ width: 100%; border-collapse: collapse; margin: 20px 0; }}
+            th {{ background: #e5e7eb; padding: 10px; text-align: left; border: 1px solid #d1d5db; }}
+            td {{ padding: 8px; border: 1px solid #e5e7eb; }}
+            .issue-box {{ background: #f9fafb; padding: 15px; margin: 10px 0; border-left: 4px solid #0EA5A4; }}
+            footer {{ margin-top: 40px; padding-top: 20px; border-top: 1px solid #ddd; color: #666; }}
+        </style>
+    </head>
+    <body>
+        <div class="header">
+            <h1>🛣️ Road Safety Inspection Report</h1>
+            <p><strong>Job ID:</strong> {job.id}</p>
+            <p><strong>Status:</strong> {job.status.upper()}</p>
+            <p><strong>Processed Frames:</strong> {job.processed_frames}</p>
+        </div>
+        
+        <div class="stats">
+            <div class="stat">
+                <h3>Total Issues</h3>
+                <p style="font-size: 24px; font-weight: bold;">{len(issues)}</p>
+            </div>
+            <div class="stat">
+                <h3>High Severity</h3>
+                <p style="font-size: 24px; font-weight: bold; color: #dc2626;">
+                    {sum(1 for i in issues if i.severity == 'HIGH')}
+                </p>
+            </div>
+            <div class="stat">
+                <h3>Medium Severity</h3>
+                <p style="font-size: 24px; font-weight: bold; color: #f59e0b;">
+                    {sum(1 for i in issues if i.severity == 'MEDIUM')}
+                </p>
+            </div>
+        </div>
+        
+        <h2>📋 Detected Issues</h2>
+        <table>
+            <thead>
+                <tr>
+                    <th>#</th>
+                    <th>Element</th>
+                    <th>Issue Type</th>
+                    <th>Severity</th>
+                    <th>Confidence</th>
+                    <th>Frame</th>
+                </tr>
+            </thead>
+            <tbody>
+    """
+    
+    for idx, issue in enumerate(issues[:50], 1):
+        html_content += f"""
+                <tr>
+                    <td>{idx}</td>
+                    <td>{issue.element.replace('_', ' ').title()}</td>
+                    <td>{issue.issue_type.upper()}</td>
+                    <td class="{issue.severity}">{issue.severity}</td>
+                    <td>{issue.confidence:.1%}</td>
+                    <td>{issue.first_frame}</td>
+                </tr>
+        """
+    
+    html_content += """
+            </tbody>
+        </table>
+        
+        <h2>⚠️ Critical Issues Requiring Immediate Attention</h2>
+    """
+    
+    critical_issues = [i for i in issues if i.severity == 'HIGH'][:10]
+    for idx, issue in enumerate(critical_issues, 1):
+        html_content += f"""
+        <div class="issue-box">
+            <h3>#{idx} - {issue.element.replace('_', ' ').title()}</h3>
+            <p><strong>Type:</strong> {issue.issue_type.upper()} | 
+               <strong>Severity:</strong> <span class="{issue.severity}">{issue.severity}</span> | 
+               <strong>Confidence:</strong> {issue.confidence:.1%}</p>
+            <p><strong>Reason:</strong> {issue.reason}</p>
+            <p><strong>Location:</strong> Frame {issue.first_frame}</p>
+        </div>
+        """
+    
+    html_content += f"""
+        <footer>
+            <p>Generated by RoadCompare AI Detection System</p>
+            <p>Report Date: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</p>
+            <p><em>For visual comparisons, please view the online report at https://road-compare.vercel.app</em></p>
+        </footer>
+    </body>
+    </html>
+    """
+    
+    # Convert HTML to bytes
+    return html_content.encode('utf-8')
 
 
 
