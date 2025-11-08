@@ -5,7 +5,7 @@ services:
     env: python
     pythonVersion: 3.11.9
     plan: free
-    buildCommand: pip install --upgrade pip && pip install --only-binary=scipy --prefer-binary -r backend/requirements.txt
+    buildCommand: pip install --upgrade pip && pip install --only-binary=scipy --prefer-binary -r backend/requirements.txt && pip cache purge
     startCommand: cd backend && uvicorn app.main:app --host 0.0.0.0 --port $PORT
     envVars:
       - key: DATABASE_URL
@@ -37,6 +37,18 @@ services:
         value: false
       - key: BACKEND_URL
         value: https://roadcompare-api.onrender.com
+      - key: USE_YOLO
+        value: true
+      - key: MODEL_PATH
+        value: models/road_defects_yolov8x.pt
+      - key: TEMPORAL_FRAMES
+        value: 5
+      - key: BLUR_THRESHOLD
+        value: 100.0
+      - key: MONGO_URI
+        sync: false
+      - key: MONGO_DB
+        value: roadcompare
     healthCheckPath: /health
 
   # Note: Worker runs in background thread within the API service (free alternative)
