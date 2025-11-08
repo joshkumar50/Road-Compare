@@ -33,21 +33,25 @@ logger = logging.getLogger(__name__)
 MODEL_PATH = os.path.join(os.path.dirname(__file__), 'models', 'road_defects_yolov8x.pt')
 FALLBACK_MODEL = 'yolov8x.pt'  # Will download pre-trained if custom not available
 
-# Per-class confidence thresholds for optimal accuracy
+# Per-class confidence thresholds for optimal accuracy (ENHANCED)
 CONFIDENCE_THRESHOLDS = {
-    'sign_board': 0.85,  # Signs are easy to detect
-    'lane_marking': 0.65,  # Medium difficulty
-    'divider': 0.70,
-    'guardrail': 0.75,
-    'pothole': 0.45,  # Harder to detect, rely on temporal filtering
-    'crack': 0.40,  # Very hard, need temporal consistency
-    'faded_marking': 0.55,  # Important safety issue
-    'damaged_sign': 0.60,
+    'sign_board': 0.80,  # Reduced for better recall
+    'lane_marking': 0.60,  # Adjusted for better detection
+    'divider': 0.65,
+    'guardrail': 0.70,
+    'pothole': 0.35,  # Lower threshold with temporal filtering
+    'crack': 0.30,  # Very hard, rely heavily on temporal consistency
+    'faded_marking': 0.45,  # Important safety issue
+    'damaged_sign': 0.50,
+    'road_damage': 0.40,
+    'debris': 0.55,
+    'missing_sign': 0.60,
 }
 
-# Temporal tracking parameters
-TEMPORAL_PERSISTENCE_FRAMES = 5  # Must be seen in 5+ frames
-MIN_TRACK_CONFIDENCE = 0.7  # Minimum average confidence across frames
+# Temporal tracking parameters (ENHANCED)
+TEMPORAL_PERSISTENCE_FRAMES = 3  # Reduced for faster detection
+MIN_TRACK_CONFIDENCE = 0.65  # Slightly lower for better recall
+MAX_TRACKING_DISTANCE = 150  # Maximum pixel distance for tracking same object
 
 # MongoDB configuration
 MONGO_URI = os.getenv('MONGO_URI', 'mongodb://localhost:27017/')
@@ -92,32 +96,56 @@ class AdvancedRoadDetector:
             logger.error(f"❌ Failed to load YOLOv8 model: {e}")
             return None
     
-    def is_frame_blurry(self, frame: np.ndarray, threshold: float = 100.0) -> bool:
-        """Check if frame is too blurry for analysis"""
+    def is_frame_blurry(self, frame: np.ndarray, threshold: float = 80.0) -> bool:
+        """Check if frame is too blurry for analysis (ENHANCED)"""
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        
+        # Use multiple blur metrics for better accuracy
         laplacian_var = cv2.Laplacian(gray, cv2.CV_64F).var()
-        return laplacian_var < threshold
+        
+        # Add Sobel gradient check
+        sobelx = cv2.Sobel(gray, cv2.CV_64F, 1, 0, ksize=3)
+        sobely = cv2.Sobel(gray, cv2.CV_64F, 0, 1, ksize=3)
+        sobel_var = np.var(sobelx) + np.var(sobely)
+        
+        # Combined metric (lower threshold for better frame acceptance)
+        return (laplacian_var < threshold) and (sobel_var < threshold * 2)
     
     def enhance_frame(self, frame: np.ndarray) -> np.ndarray:
-        """Apply advanced enhancements to frame"""
-        # Denoise
-        denoised = cv2.fastNlMeansDenoisingColored(frame, None, 10, 10, 7, 21)
+        """Apply advanced enhancements to frame (ENHANCED)"""
+        # Fast denoising (reduced parameters for speed)
+        denoised = cv2.fastNlMeansDenoisingColored(frame, None, 6, 6, 7, 15)
         
-        # Enhance contrast using CLAHE
+        # Enhance contrast using CLAHE with optimized parameters
         lab = cv2.cvtColor(denoised, cv2.COLOR_BGR2LAB)
         l, a, b = cv2.split(lab)
-        clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8,8))
+        clahe = cv2.createCLAHE(clipLimit=2.5, tileGridSize=(8,8))
         l = clahe.apply(l)
         enhanced = cv2.merge([l, a, b])
         enhanced = cv2.cvtColor(enhanced, cv2.COLOR_LAB2BGR)
         
-        # Sharpen
-        kernel = np.array([[-1,-1,-1],
-                           [-1, 9,-1],
-                           [-1,-1,-1]])
+        # Adaptive sharpening based on image content
+        gray = cv2.cvtColor(enhanced, cv2.COLOR_BGR2GRAY)
+        blur_level = cv2.Laplacian(gray, cv2.CV_64F).var()
+        
+        if blur_level < 100:  # More aggressive sharpening for blurry images
+            kernel = np.array([[-1,-1,-1],
+                               [-1, 10,-1],
+                               [-1,-1,-1]])
+        else:  # Moderate sharpening for clear images
+            kernel = np.array([[-1,-1,-1],
+                               [-1, 9,-1],
+                               [-1,-1,-1]])
+        
         sharpened = cv2.filter2D(enhanced, -1, kernel)
         
-        return sharpened
+        # Gamma correction for better visibility
+        gamma = 1.2
+        inv_gamma = 1.0 / gamma
+        table = np.array([((i / 255.0) ** inv_gamma) * 255 for i in range(256)]).astype("uint8")
+        gamma_corrected = cv2.LUT(sharpened, table)
+        
+        return gamma_corrected
     
     def extract_frames(self, video_path: str, fps: int = 2, max_frames: int = 120) -> List[np.ndarray]:
         """Extract high-quality frames with quality control"""
@@ -173,12 +201,19 @@ class AdvancedRoadDetector:
         return frames
     
     def detect_with_yolo(self, frame: np.ndarray, frame_idx: int) -> List[Detection]:
-        """Detect road elements using YOLOv8 with per-class thresholds"""
+        """Detect road elements using YOLOv8 with per-class thresholds (ENHANCED)"""
         if not self.model:
             return []
         
-        # Run inference
-        results = self.model(frame, verbose=False, conf=0.3)  # Low base threshold
+        # Run inference with optimized parameters
+        results = self.model(
+            frame, 
+            verbose=False, 
+            conf=0.25,  # Lower base threshold
+            iou=0.45,   # NMS IoU threshold
+            max_det=100,  # Maximum detections per image
+            agnostic_nms=False  # Class-specific NMS
+        )
         
         detections = []
         class_names = self.model.names
@@ -198,6 +233,17 @@ class AdvancedRoadDetector:
                 if conf < min_conf:
                     continue
                 
+                # Filter out tiny detections (likely noise)
+                bbox_area = (x2 - x1) * (y2 - y1)
+                if bbox_area < 100:  # Minimum 10x10 pixels
+                    continue
+                
+                # Filter out detections at image edges (often false positives)
+                h, w = frame.shape[:2]
+                if x1 < 5 or y1 < 5 or x2 > w - 5 or y2 > h - 5:
+                    if conf < min_conf * 1.2:  # Require higher confidence for edge detections
+                        continue
+                
                 detections.append(Detection(
                     bbox=[x1, y1, x2, y2],
                     element_type=class_name,
@@ -208,33 +254,65 @@ class AdvancedRoadDetector:
         return detections
     
     def track_objects(self, detections: List[Detection]) -> List[Detection]:
-        """Apply temporal tracking to reduce false positives"""
+        """Apply temporal tracking to reduce false positives (ENHANCED)"""
         tracked = []
         
         for det in detections:
-            # Create unique track ID based on type and grid location
+            # Create unique track ID based on type and spatial location
             x_center = (det.bbox[0] + det.bbox[2]) // 2
             y_center = (det.bbox[1] + det.bbox[3]) // 2
-            grid_x = x_center // 100
-            grid_y = y_center // 100
-            track_id = f"{det.element_type}_{grid_x}_{grid_y}"
+            
+            # Find existing track within MAX_TRACKING_DISTANCE
+            best_track_id = None
+            min_distance = float('inf')
+            
+            for track_id, track_data in self.tracked_objects.items():
+                if not track_id.startswith(det.element_type):
+                    continue
+                
+                if track_data['detections']:
+                    last_det = track_data['detections'][-1]
+                    last_x = (last_det.bbox[0] + last_det.bbox[2]) // 2
+                    last_y = (last_det.bbox[1] + last_det.bbox[3]) // 2
+                    
+                    distance = np.sqrt((x_center - last_x)**2 + (y_center - last_y)**2)
+                    
+                    if distance < MAX_TRACKING_DISTANCE and distance < min_distance:
+                        min_distance = distance
+                        best_track_id = track_id
+            
+            # Create new track if no match found
+            if best_track_id is None:
+                grid_x = x_center // 80  # Smaller grid for better tracking
+                grid_y = y_center // 80
+                best_track_id = f"{det.element_type}_{grid_x}_{grid_y}_{det.frame_idx}"
             
             # Update tracking
-            track = self.tracked_objects[track_id]
+            track = self.tracked_objects[best_track_id]
             track['detections'].append(det)
             
             if track['first_frame'] is None:
                 track['first_frame'] = det.frame_idx
             track['last_frame'] = det.frame_idx
             
-            # Calculate average confidence
+            # Calculate weighted average confidence (recent frames weighted more)
             confidences = [d.confidence for d in track['detections']]
-            track['avg_confidence'] = sum(confidences) / len(confidences)
+            weights = [1.0 + (i * 0.1) for i in range(len(confidences))]  # Linear weight increase
+            track['avg_confidence'] = sum(c * w for c, w in zip(confidences, weights)) / sum(weights)
             
-            # Check if object is confirmed (seen enough times with good confidence)
-            if (len(track['detections']) >= TEMPORAL_PERSISTENCE_FRAMES and 
-                track['avg_confidence'] >= MIN_TRACK_CONFIDENCE):
-                det.track_id = track_id
+            # Enhanced confirmation logic
+            frame_span = track['last_frame'] - track['first_frame'] + 1
+            detection_density = len(track['detections']) / max(frame_span, 1)
+            
+            # Check if object is confirmed
+            is_confirmed = (
+                len(track['detections']) >= TEMPORAL_PERSISTENCE_FRAMES and 
+                track['avg_confidence'] >= MIN_TRACK_CONFIDENCE and
+                detection_density >= 0.4  # Must appear in at least 40% of frames in span
+            )
+            
+            if is_confirmed:
+                det.track_id = best_track_id
                 tracked.append(det)
         
         return tracked

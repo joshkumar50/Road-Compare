@@ -4,8 +4,10 @@
   "outputDirectory": "dist",
   "installCommand": "npm install",
   "framework": "vite",
-  "env": {
-    "VITE_API": "https://roadcompare-api.onrender.com/api/v1"
+  "build": {
+    "env": {
+      "VITE_API": "https://roadcompare-api.onrender.com/api/v1"
+    }
   },
   "headers": [
     {
@@ -13,6 +15,14 @@
       "headers": [
         {
           "key": "Access-Control-Allow-Origin",
+          "value": "*"
+        },
+        {
+          "key": "Access-Control-Allow-Methods",
+          "value": "GET, POST, PUT, DELETE, OPTIONS, PATCH"
+        },
+        {
+          "key": "Access-Control-Allow-Headers",
           "value": "*"
         }
       ]

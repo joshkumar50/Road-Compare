@@ -30,16 +30,49 @@ api_router = APIRouter()
 def debug_config():
     """Debug endpoint to check API configuration"""
     import os
-    return {
-        "api_prefix": settings.api_prefix,
-        "frontend_url": settings.frontend_url,
-        "cors_origins": settings.cors_origins,
-        "database_connected": True,
-        "redis_url_set": bool(settings.redis_url),
-        "use_database_storage": os.getenv("USE_DATABASE_STORAGE", "true"),
-        "demo_mode": settings.demo_mode,
-        "use_yolo": settings.use_yolo,
-    }
+    import logging
+    logger = logging.getLogger(__name__)
+    
+    try:
+        logger.info("🔧 Debug config requested")
+        
+        # Test database connection
+        db_status = "connected"
+        try:
+            from .db import engine
+            from sqlalchemy import text
+            with engine.connect() as conn:
+                conn.execute(text("SELECT 1"))
+        except Exception as e:
+            db_status = f"error: {str(e)}"
+        
+        # Test Redis connection
+        redis_status = "not configured"
+        if settings.redis_url:
+            try:
+                from redis import Redis
+                redis_conn = Redis.from_url(settings.redis_url, socket_connect_timeout=2)
+                redis_conn.ping()
+                redis_status = "connected"
+            except Exception as e:
+                redis_status = f"error: {str(e)}"
+        
+        return {
+            "api_prefix": settings.api_prefix,
+            "frontend_url": settings.frontend_url,
+            "cors_origins": settings.cors_origins,
+            "database_status": db_status,
+            "redis_status": redis_status,
+            "use_database_storage": os.getenv("USE_DATABASE_STORAGE", "true"),
+            "demo_mode": settings.demo_mode,
+            "use_yolo": settings.use_yolo,
+            "model_path": settings.model_path,
+            "confidence_threshold": settings.confidence_threshold,
+            "frame_rate": settings.frame_rate,
+        }
+    except Exception as e:
+        logger.error(f"❌ Error in debug config: {e}")
+        return {"error": str(e)}
 
 
 @api_router.post("/uploads/presign", response_model=PresignResponse)
@@ -60,35 +93,80 @@ async def create_job(
     metadata: str | None = None,
     db: Session = Depends(get_db),
 ):
-    """Create a new video analysis job"""
-    print(f"📥 Received job creation request")
-    print(f"   - Base video: {base_video.filename if base_video else 'None'}")
-    print(f"   - Present video: {present_video.filename if present_video else 'None'}")
-    print(f"   - Sample rate: {sample_rate}")
+    """Create a new video analysis job with comprehensive validation"""
+    import logging
+    logger = logging.getLogger(__name__)
+    
+    logger.info(f"📥 Received job creation request")
+    logger.info(f"   - Base video: {base_video.filename if base_video else 'None'}")
+    logger.info(f"   - Present video: {present_video.filename if present_video else 'None'}")
+    logger.info(f"   - Sample rate: {sample_rate}")
     
     try:
         job_id = str(uuid.uuid4())
         
         # Validate videos are provided
         if not base_video or not present_video:
-            print(f"❌ Validation failed: Missing videos")
+            logger.error(f"❌ Validation failed: Missing videos")
             raise HTTPException(400, "Both base_video and present_video are required")
+        
+        # Validate file types
+        allowed_types = ['video/mp4', 'video/mpeg', 'video/quicktime', 'video/x-msvideo', 'video/x-matroska']
+        base_type = base_video.content_type or "video/mp4"
+        present_type = present_video.content_type or "video/mp4"
+        
+        if base_type not in allowed_types and not base_video.filename.endswith(('.mp4', '.avi', '.mov', '.mkv')):
+            logger.error(f"❌ Invalid base video type: {base_type}")
+            raise HTTPException(400, f"Invalid base video format. Allowed: MP4, AVI, MOV, MKV")
+        
+        if present_type not in allowed_types and not present_video.filename.endswith(('.mp4', '.avi', '.mov', '.mkv')):
+            logger.error(f"❌ Invalid present video type: {present_type}")
+            raise HTTPException(400, f"Invalid present video format. Allowed: MP4, AVI, MOV, MKV")
+        
+        # Validate sample rate
+        if sample_rate < 1 or sample_rate > 30:
+            logger.error(f"❌ Invalid sample rate: {sample_rate}")
+            raise HTTPException(400, "Sample rate must be between 1 and 30")
         
         # If direct upload provided, stream to object storage
         base_key = f"jobs/{job_id}/base/{base_video.filename}"
         present_key = f"jobs/{job_id}/present/{present_video.filename}"
         
-        print(f"📤 Uploading videos for job {job_id}")
-        put_bytes(base_key, await base_video.read(), base_video.content_type or "video/mp4")
-        put_bytes(present_key, await present_video.read(), present_video.content_type or "video/mp4")
-        print(f"✅ Videos uploaded for job {job_id}")
+        logger.info(f"📤 Uploading videos for job {job_id}")
+        
+        # Read videos with size validation
+        base_content = await base_video.read()
+        present_content = await present_video.read()
+        
+        # Validate file sizes (max 500MB per video for free tier)
+        max_size = 500 * 1024 * 1024  # 500MB
+        if len(base_content) > max_size:
+            logger.error(f"❌ Base video too large: {len(base_content)} bytes")
+            raise HTTPException(400, f"Base video exceeds maximum size of 500MB")
+        
+        if len(present_content) > max_size:
+            logger.error(f"❌ Present video too large: {len(present_content)} bytes")
+            raise HTTPException(400, f"Present video exceeds maximum size of 500MB")
+        
+        put_bytes(base_key, base_content, base_type)
+        put_bytes(present_key, present_content, present_type)
+        logger.info(f"✅ Videos uploaded for job {job_id}")
 
-        meta_json = json.loads(metadata) if metadata else {}
+        # Parse and validate metadata
+        meta_json = {}
+        if metadata:
+            try:
+                meta_json = json.loads(metadata)
+                if not isinstance(meta_json, dict):
+                    raise ValueError("Metadata must be a JSON object")
+            except json.JSONDecodeError as e:
+                logger.error(f"❌ Invalid metadata JSON: {e}")
+                raise HTTPException(400, f"Invalid metadata JSON: {str(e)}")
 
         job = Job(id=job_id, status="queued", metadata_json=meta_json, sample_rate=sample_rate)
         db.add(job)
         db.commit()
-        print(f"✅ Job {job_id} created in database")
+        logger.info(f"✅ Job {job_id} created in database")
 
         enqueue_job({
             "job_id": job_id,
@@ -97,71 +175,104 @@ async def create_job(
             "sample_rate": sample_rate,
             "metadata": meta_json,
         })
-        print(f"✅ Job {job_id} enqueued for processing")
+        logger.info(f"✅ Job {job_id} enqueued for processing")
 
-        return {"job_id": job_id, "status": "queued"}
+        return {"job_id": job_id, "status": "queued", "message": "Job created successfully"}
         
     except HTTPException:
         raise
     except Exception as e:
-        print(f"❌ Error creating job: {type(e).__name__}: {e}")
+        logger.error(f"❌ Error creating job: {type(e).__name__}: {e}")
+        import traceback
+        traceback.print_exc()
         raise HTTPException(500, f"Failed to create job: {str(e)}")
 
 
 @api_router.get("/jobs", response_model=List[JobSummary])
 def list_jobs(db: Session = Depends(get_db)):
     """List all jobs with their status and summary"""
+    import logging
+    logger = logging.getLogger(__name__)
+    
     try:
-        print("📋 Fetching all jobs...")
-        jobs = db.query(Job).order_by(Job.created_at.desc()).all()
-        print(f"✅ Found {len(jobs)} jobs")
+        logger.info("📋 Fetching all jobs...")
+        jobs = db.query(Job).order_by(Job.created_at.desc()).limit(1000).all()  # Limit for performance
+        logger.info(f"✅ Found {len(jobs)} jobs")
+        
         return [
             JobSummary(
                 id=j.id,
                 status=j.status,
-                processed_frames=j.processed_frames,
-                runtime_seconds=j.runtime_seconds,
+                processed_frames=j.processed_frames or 0,
+                runtime_seconds=j.runtime_seconds or 0,
                 summary=j.summary_json or {},
             )
             for j in jobs
         ]
     except Exception as e:
-        print(f"❌ Error fetching jobs: {type(e).__name__}: {e}")
+        logger.error(f"❌ Error fetching jobs: {type(e).__name__}: {e}")
+        import traceback
+        traceback.print_exc()
         raise HTTPException(500, f"Failed to fetch jobs: {str(e)}")
 
 
 @api_router.get("/jobs/{job_id}/results", response_model=JobResult)
 def get_results(job_id: str, db: Session = Depends(get_db)):
-    job = db.get(Job, job_id)
-    if not job:
-        raise HTTPException(404, "job not found")
-    issues = db.query(Issue).filter(Issue.job_id == job_id).all()
-    return JobResult(
-        summary=JobSummary(
-            id=job.id,
-            status=job.status,
-            processed_frames=job.processed_frames,
-            runtime_seconds=job.runtime_seconds,
-            summary=job.summary_json or {},
-        ),
-        issues=[
-            IssueSchema(
-                id=i.id,
-                element=i.element,
-                issue_type=i.issue_type,
-                severity=i.severity,
-                confidence=i.confidence,
-                first_frame=i.first_frame,
-                last_frame=i.last_frame,
-                base_crop_url=i.base_crop_url,
-                present_crop_url=i.present_crop_url,
-                reason=i.reason,
-                gps=i.gps,
-                status=i.status,
-            )
-            for i in issues
-        ],
-    )
+    """Get job results with comprehensive error handling"""
+    import logging
+    logger = logging.getLogger(__name__)
+    
+    try:
+        logger.info(f"🔍 Fetching results for job {job_id}")
+        
+        # Validate job_id format
+        try:
+            uuid.UUID(job_id)
+        except ValueError:
+            logger.error(f"❌ Invalid job ID format: {job_id}")
+            raise HTTPException(400, "Invalid job ID format")
+        
+        job = db.get(Job, job_id)
+        if not job:
+            logger.error(f"❌ Job not found: {job_id}")
+            raise HTTPException(404, f"Job {job_id} not found")
+        
+        issues = db.query(Issue).filter(Issue.job_id == job_id).all()
+        logger.info(f"✅ Found {len(issues)} issues for job {job_id}")
+        
+        return JobResult(
+            summary=JobSummary(
+                id=job.id,
+                status=job.status,
+                processed_frames=job.processed_frames or 0,
+                runtime_seconds=job.runtime_seconds or 0,
+                summary=job.summary_json or {},
+            ),
+            issues=[
+                IssueSchema(
+                    id=i.id,
+                    element=i.element or "unknown",
+                    issue_type=i.issue_type or "unknown",
+                    severity=i.severity or "MEDIUM",
+                    confidence=i.confidence or 0.0,
+                    first_frame=i.first_frame or 0,
+                    last_frame=i.last_frame or 0,
+                    base_crop_url=i.base_crop_url or "",
+                    present_crop_url=i.present_crop_url or "",
+                    reason=i.reason or "No reason provided",
+                    gps=i.gps or "{}",
+                    status=i.status or "pending",
+                )
+                for i in issues
+            ],
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ Error fetching results for job {job_id}: {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(500, f"Failed to fetch results: {str(e)}")
 
 
 @api_router.get("/jobs/{job_id}/results.csv")
@@ -221,11 +332,23 @@ def report_pdf(job_id: str, db: Session = Depends(get_db)):
     """Generate PDF or HTML report for job"""
     from .pdf import generate_pdf
     from fastapi.responses import Response
+    import logging
+    logger = logging.getLogger(__name__)
     
     try:
+        logger.info(f"📄 Generating report for job {job_id}")
+        
+        # Validate job_id format
+        try:
+            uuid.UUID(job_id)
+        except ValueError:
+            logger.error(f"❌ Invalid job ID format: {job_id}")
+            raise HTTPException(400, "Invalid job ID format")
+        
         job = db.get(Job, job_id)
         if not job:
-            raise HTTPException(404, "Job not found")
+            logger.error(f"❌ Job not found: {job_id}")
+            raise HTTPException(404, f"Job {job_id} not found")
         
         issues = db.query(Issue).filter(Issue.job_id == job_id).all()
         
@@ -329,46 +452,90 @@ def cleanup_old_storage(days: int = 7, db: Session = Depends(get_db)):
 @api_router.delete("/jobs/{job_id}")
 def delete_job(job_id: str, db: Session = Depends(get_db)):
     """Delete a job and all associated data (issues, feedback, storage)"""
-    job = db.get(Job, job_id)
-    if not job:
-        raise HTTPException(404, "job not found")
+    import logging
+    logger = logging.getLogger(__name__)
     
-    # Delete all issues and feedback associated with this job
-    issues = db.query(Issue).filter(Issue.job_id == job_id).all()
-    for issue in issues:
-        db.query(Feedback).filter(Feedback.issue_id == issue.id).delete()
-        db.delete(issue)
-    
-    # Delete the job
-    db.delete(job)
-    db.commit()
-    
-    # Delete storage files (best effort) - no longer needed with base64 data URLs
-    pass
-    
-    return {"ok": True, "message": f"Job {job_id} and all associated data deleted"}
+    try:
+        logger.info(f"🗑️ Deleting job {job_id}")
+        
+        # Validate job_id format
+        try:
+            uuid.UUID(job_id)
+        except ValueError:
+            logger.error(f"❌ Invalid job ID format: {job_id}")
+            raise HTTPException(400, "Invalid job ID format")
+        
+        job = db.get(Job, job_id)
+        if not job:
+            logger.error(f"❌ Job not found: {job_id}")
+            raise HTTPException(404, f"Job {job_id} not found")
+        
+        # Delete all issues and feedback associated with this job
+        issues = db.query(Issue).filter(Issue.job_id == job_id).all()
+        issue_count = len(issues)
+        
+        for issue in issues:
+            feedback_count = db.query(Feedback).filter(Feedback.issue_id == issue.id).delete()
+            db.delete(issue)
+        
+        # Delete the job
+        db.delete(job)
+        db.commit()
+        
+        logger.info(f"✅ Deleted job {job_id} with {issue_count} issues")
+        
+        return {
+            "ok": True, 
+            "message": f"Job {job_id} and all associated data deleted",
+            "deleted_issues": issue_count
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ Error deleting job {job_id}: {e}")
+        db.rollback()
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(500, f"Failed to delete job: {str(e)}")
 
 
 @api_router.delete("/jobs")
 def delete_all_jobs(db: Session = Depends(get_db)):
     """Delete all jobs and associated data (use with caution)"""
-    # Get all jobs
-    jobs = db.query(Job).all()
-    job_ids = [j.id for j in jobs]
+    import logging
+    logger = logging.getLogger(__name__)
     
-    # Delete all feedback
-    db.query(Feedback).delete()
-    
-    # Delete all issues
-    db.query(Issue).delete()
-    
-    # Delete all jobs
-    db.query(Job).delete()
-    db.commit()
-    
-    # Delete storage files (best effort) - no longer needed with base64 data URLs
-    pass
-    
-    return {"ok": True, "message": f"All {len(job_ids)} jobs deleted"}
+    try:
+        logger.warning("⚠️ Deleting ALL jobs - this is a destructive operation")
+        
+        # Get all jobs
+        jobs = db.query(Job).all()
+        job_count = len(jobs)
+        
+        # Delete all feedback
+        feedback_count = db.query(Feedback).delete()
+        
+        # Delete all issues
+        issue_count = db.query(Issue).delete()
+        
+        # Delete all jobs
+        db.query(Job).delete()
+        db.commit()
+        
+        logger.info(f"✅ Deleted {job_count} jobs, {issue_count} issues, {feedback_count} feedback")
+        
+        return {
+            "ok": True, 
+            "message": f"All {job_count} jobs deleted",
+            "deleted_jobs": job_count,
+            "deleted_issues": issue_count,
+            "deleted_feedback": feedback_count
+        }
+    except Exception as e:
+        logger.error(f"❌ Error deleting all jobs: {e}")
+        db.rollback()
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(500, f"Failed to delete all jobs: {str(e)}")
 
 

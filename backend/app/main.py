@@ -52,35 +52,46 @@ allowed_origins = [origin.strip() for origin in settings.cors_origins]
 if settings.frontend_url not in allowed_origins:
     allowed_origins.insert(0, settings.frontend_url)
 
-# Add both Vercel domain variations
+# Add both Vercel domain variations and localhost
 allowed_origins.extend([
     "https://roadcompare.vercel.app",
     "https://road-compare.vercel.app",
     "http://localhost:5173",
-    "http://localhost:3000"
+    "http://localhost:3000",
+    "http://127.0.0.1:5173",
+    "http://127.0.0.1:3000"
 ])
 
-# Remove duplicates
-allowed_origins = list(set(allowed_origins))
+# Remove duplicates while preserving order
+allowed_origins = list(dict.fromkeys(allowed_origins))
 
-print(f"✅ CORS allowed origins: {allowed_origins}")
+logger.info(f"✅ CORS allowed origins: {allowed_origins}")
 
-# CORS configuration for production
+# CORS configuration for production - CRITICAL: Must be added BEFORE routes
 app.add_middleware(
     CORSMiddleware,
     allow_origins=allowed_origins,  # Use configured origins
-    allow_credentials=False,
-    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
+    allow_credentials=True,  # Changed to True for better compatibility
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH", "HEAD"],
     allow_headers=["*"],
     expose_headers=["*"],
-    max_age=3600,
+    max_age=86400,  # Cache preflight for 24 hours
 )
 
-# Add fallback OPTIONS handler for CORS preflight
+# Add explicit OPTIONS handler for CORS preflight
 @app.options("/{full_path:path}")
 async def options_handler(full_path: str):
-    """Handle CORS preflight requests"""
-    return {"message": "OK"}
+    """Handle CORS preflight requests explicitly"""
+    from fastapi.responses import Response
+    return Response(
+        status_code=200,
+        headers={
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS, PATCH, HEAD",
+            "Access-Control-Allow-Headers": "*",
+            "Access-Control-Max-Age": "86400",
+        }
+    )
 
 
 @app.get("/")

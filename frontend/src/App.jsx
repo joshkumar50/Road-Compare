@@ -4,6 +4,39 @@ import ReactPlayer from 'react-player'
 
 const API = import.meta.env.VITE_API || 'http://localhost:8000/api/v1'
 
+// Configure axios defaults for better CORS handling
+axios.defaults.withCredentials = true
+axios.defaults.headers.common['Content-Type'] = 'application/json'
+
+// Add axios interceptor for better error handling
+axios.interceptors.response.use(
+  response => response,
+  error => {
+    console.error('API Error:', {
+      url: error.config?.url,
+      method: error.config?.method,
+      status: error.response?.status,
+      message: error.message,
+      data: error.response?.data
+    })
+    return Promise.reject(error)
+  }
+)
+
+// Retry helper for failed requests
+const retryRequest = async (fn, retries = 3, delay = 1000) => {
+  for (let i = 0; i < retries; i++) {
+    try {
+      return await fn()
+    } catch (error) {
+      if (i === retries - 1) throw error
+      console.log(`Retry attempt ${i + 1}/${retries} after ${delay}ms...`)
+      await new Promise(resolve => setTimeout(resolve, delay))
+      delay *= 2 // Exponential backoff
+    }
+  }
+}
+
 function Upload({ onJobCreated }) {
   const [base, setBase] = useState(null)
   const [present, setPresent] = useState(null)
@@ -95,10 +128,11 @@ function Jobs({ refreshTrigger }) {
 
   const fetchJobs = async () => {
     try {
-      const res = await axios.get(`${API}/jobs`)
+      const res = await retryRequest(() => axios.get(`${API}/jobs`))
       setJobs(res.data)
     } catch (err) {
       console.error('Failed to fetch jobs:', err)
+      // Don't show error to user for polling failures
     }
   }
 
@@ -198,10 +232,11 @@ function JobViewer({jobId}) {
     const fetchData = async () => {
       try {
         setLoading(true)
-        const res = await axios.get(`${API}/jobs/${jobId}/results`)
+        const res = await retryRequest(() => axios.get(`${API}/jobs/${jobId}/results`))
         setData(res.data)
       } catch (err) {
         console.error('Failed to fetch results:', err)
+        setData({ error: 'Failed to load results. Please try again.' })
       } finally {
         setLoading(false)
       }
@@ -216,6 +251,7 @@ function JobViewer({jobId}) {
 
   if (loading) return <div className="card mt-4 text-center py-8">⏳ Loading results...</div>
   if (!data) return <div className="card mt-4 text-center py-8">❌ Failed to load results</div>
+  if (data.error) return <div className="card mt-4 text-center py-8 text-red-600">❌ {data.error}</div>
 
   const { summary, issues } = data
   const issueStats = {
@@ -360,7 +396,7 @@ function Metrics(){
   useEffect(() => {
     const fetchStats = async () => {
       try {
-        const res = await axios.get(`${API}/jobs`)
+        const res = await retryRequest(() => axios.get(`${API}/jobs`))
         const jobs = res.data
         const completed = jobs.filter(j => j.status === 'completed')
         const failed = jobs.filter(j => j.status === 'failed')
@@ -374,9 +410,11 @@ function Metrics(){
           totalFrames += job.processed_frames || 0
           avgRuntime += job.runtime_seconds || 0
           try {
-            const res2 = await axios.get(`${API}/jobs/${job.id}/results`)
+            const res2 = await retryRequest(() => axios.get(`${API}/jobs/${job.id}/results`))
             totalIssues += res2.data.issues.length
-          } catch (e) {}
+          } catch (e) {
+            console.error(`Failed to fetch results for job ${job.id}:`, e)
+          }
         }
         
         setStats({
