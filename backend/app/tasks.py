@@ -14,8 +14,15 @@ def get_queue() -> Queue:
 def enqueue_job(payload: dict) -> str:
     job_id = payload.get("job_id", str(uuid.uuid4()))
     
-    # Defer import to avoid heavy deps on import time
-    from .worker import run_pipeline
+    # Choose pipeline based on configuration
+    if settings.use_yolo:
+        # Use advanced YOLOv8 pipeline
+        from .worker_advanced import run_advanced_pipeline as run_pipeline
+        print(f"🤖 Using YOLOv8 AI pipeline for job {job_id}")
+    else:
+        # Use basic pipeline
+        from .worker import run_pipeline
+        print(f"📊 Using basic pipeline for job {job_id}")
     
     # Check if background worker is enabled
     if os.getenv("ENABLE_WORKER", "false").lower() == "true":

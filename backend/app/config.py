@@ -32,7 +32,17 @@ class Settings(BaseModel):
     confidence_threshold: float = float(os.getenv("CONFIDENCE_THRESHOLD", "0.25"))
     
     # Demo mode - use synthetic data instead of real video processing
-    demo_mode: bool = os.getenv("DEMO_MODE", "true").lower() == "true"
+    demo_mode: bool = os.getenv("DEMO_MODE", "false").lower() == "true"
+    
+    # MongoDB configuration for scalable storage
+    mongo_uri: str = os.getenv("MONGO_URI", "mongodb://localhost:27017/")
+    mongo_db: str = os.getenv("MONGO_DB", "roadcompare")
+    
+    # AI Model configuration
+    model_path: str = os.getenv("MODEL_PATH", "models/road_defects_yolov8x.pt")
+    use_yolo: bool = os.getenv("USE_YOLO", "true").lower() == "true"
+    temporal_frames: int = int(os.getenv("TEMPORAL_FRAMES", "5"))
+    blur_threshold: float = float(os.getenv("BLUR_THRESHOLD", "100.0"))
 
 
 settings = Settings()
