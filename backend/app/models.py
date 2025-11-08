@@ -47,6 +47,17 @@ class Feedback(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
 
 
+class VideoMetadata(Base):
+    __tablename__ = "video_metadata"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    key = Column(String, unique=True, index=True)
+    filename = Column(String)
+    content_type = Column(String)
+    size = Column(Integer)
+    storage_path = Column(Text)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
 
 
 

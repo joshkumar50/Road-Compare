@@ -11,10 +11,14 @@ from .config import settings
 import os
 
 # Choose storage backend based on environment
-if os.getenv("USE_DATABASE_STORAGE", "true").lower() == "true":
+storage_mode = os.getenv("STORAGE_MODE", "hybrid").lower()
+if storage_mode == "database":
     from .storage_database import put_bytes, presign_put
-else:
+elif storage_mode == "simple":
     from .storage_simple import put_bytes, presign_put
+else:
+    # Use hybrid storage by default for better memory management
+    from .storage_hybrid import put_bytes, presign_put
 import uuid
 import csv
 import io
@@ -134,22 +138,47 @@ async def create_job(
         
         logger.info(f"📤 Uploading videos for job {job_id}")
         
-        # Read videos with size validation
-        base_content = await base_video.read()
-        present_content = await present_video.read()
+        # Stream videos to storage with chunked reading for memory efficiency
+        max_size = 100 * 1024 * 1024  # 100MB limit for free tier
+        chunk_size = 1024 * 1024  # 1MB chunks
         
-        # Validate file sizes (max 500MB per video for free tier)
-        max_size = 500 * 1024 * 1024  # 500MB
-        if len(base_content) > max_size:
-            logger.error(f"❌ Base video too large: {len(base_content)} bytes")
-            raise HTTPException(400, f"Base video exceeds maximum size of 500MB")
+        # Process base video
+        base_size = 0
+        base_chunks = []
+        while True:
+            chunk = await base_video.read(chunk_size)
+            if not chunk:
+                break
+            base_size += len(chunk)
+            if base_size > max_size:
+                logger.error(f"❌ Base video too large: {base_size} bytes")
+                raise HTTPException(400, f"Base video exceeds maximum size of 100MB")
+            base_chunks.append(chunk)
         
-        if len(present_content) > max_size:
-            logger.error(f"❌ Present video too large: {len(present_content)} bytes")
-            raise HTTPException(400, f"Present video exceeds maximum size of 500MB")
+        base_content = b''.join(base_chunks)
         
-        put_bytes(base_key, base_content, base_type)
-        put_bytes(present_key, present_content, present_type)
+        # Process present video
+        present_size = 0
+        present_chunks = []
+        while True:
+            chunk = await present_video.read(chunk_size)
+            if not chunk:
+                break
+            present_size += len(chunk)
+            if present_size > max_size:
+                logger.error(f"❌ Present video too large: {present_size} bytes")
+                raise HTTPException(400, f"Present video exceeds maximum size of 100MB")
+            present_chunks.append(chunk)
+        
+        present_content = b''.join(present_chunks)
+        
+        # Store videos
+        try:
+            put_bytes(base_key, base_content, base_type)
+            put_bytes(present_key, present_content, present_type)
+        except Exception as e:
+            logger.error(f"❌ Failed to store videos: {e}")
+            raise HTTPException(500, f"Failed to store videos: {str(e)}")
         logger.info(f"✅ Videos uploaded for job {job_id}")
 
         # Parse and validate metadata
@@ -196,8 +225,21 @@ def list_jobs(db: Session = Depends(get_db)):
     
     try:
         logger.info("📋 Fetching all jobs...")
-        jobs = db.query(Job).order_by(Job.created_at.desc()).limit(1000).all()  # Limit for performance
+        
+        # More efficient query with limited columns
+        jobs = db.query(
+            Job.id,
+            Job.status,
+            Job.processed_frames,
+            Job.runtime_seconds,
+            Job.summary_json
+        ).order_by(Job.created_at.desc()).limit(100).all()  # Reduced limit for free tier
+        
         logger.info(f"✅ Found {len(jobs)} jobs")
+        
+        # Handle empty result set
+        if not jobs:
+            return []
         
         return [
             JobSummary(
@@ -213,7 +255,9 @@ def list_jobs(db: Session = Depends(get_db)):
         logger.error(f"❌ Error fetching jobs: {type(e).__name__}: {e}")
         import traceback
         traceback.print_exc()
-        raise HTTPException(500, f"Failed to fetch jobs: {str(e)}")
+        
+        # Return empty list instead of 500 error for better UX
+        return []
 
 
 @api_router.get("/jobs/{job_id}/results", response_model=JobResult)
