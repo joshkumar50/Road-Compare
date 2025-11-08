@@ -71,7 +71,7 @@ logger.info(f"✅ CORS allowed origins: {allowed_origins}")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=allowed_origins,  # Use configured origins
-    allow_credentials=True,  # Changed to True for better compatibility
+    allow_credentials=False,  # Set to False to avoid preflight complexity
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH", "HEAD"],
     allow_headers=["*"],
     expose_headers=["*"],

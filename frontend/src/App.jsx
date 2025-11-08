@@ -5,7 +5,7 @@ import ReactPlayer from 'react-player'
 const API = import.meta.env.VITE_API || 'http://localhost:8000/api/v1'
 
 // Configure axios defaults for better CORS handling
-axios.defaults.withCredentials = true
+// Note: withCredentials removed to prevent CORS issues
 axios.defaults.headers.common['Content-Type'] = 'application/json'
 
 // Add axios interceptor for better error handling
@@ -138,13 +138,17 @@ function Jobs({ refreshTrigger }) {
 
   useEffect(() => {
     fetchJobs()
+  }, [refreshTrigger])
+  
+  // Separate effect for polling to avoid infinite loops
+  useEffect(() => {
     // Only poll if there are processing jobs
     const hasProcessing = jobs.some(j => j.status === 'processing' || j.status === 'queued')
     if (!hasProcessing) return
     
-    const iv = setInterval(fetchJobs, 5000) // Reduced frequency to 5 seconds
+    const iv = setInterval(fetchJobs, 10000) // Poll every 10 seconds
     return () => clearInterval(iv)
-  }, [refreshTrigger, jobs])
+  }, [jobs.map(j => j.status).join(',')]) // Only re-run when job statuses change
 
   const deleteJob = async (jobId, e) => {
     e.preventDefault()
