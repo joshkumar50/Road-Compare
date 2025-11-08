@@ -65,7 +65,8 @@ class StorageManager:
         db: Session = self.SessionLocal()
         try:
             # For large videos, use MongoDB GridFS if available
-            if self.gridfs and len(data) > 5 * 1024 * 1024:  # > 5MB
+            # Reduced threshold to 2MB to save memory on free tier
+            if self.gridfs and len(data) > 2 * 1024 * 1024:  # > 2MB
                 # Store in MongoDB GridFS
                 file_id = self.gridfs.put(
                     data,

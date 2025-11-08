@@ -32,13 +32,13 @@ services:
       - key: CONFIDENCE_THRESHOLD
         value: 0.25
       - key: DEMO_MODE
-        value: false
+        value: true
       - key: ENABLE_WORKER
         value: false
       - key: BACKEND_URL
         value: https://roadcompare-api.onrender.com
       - key: USE_YOLO
-        value: true
+        value: false
       - key: MODEL_PATH
         value: models/road_defects_yolov8x.pt
       - key: TEMPORAL_FRAMES

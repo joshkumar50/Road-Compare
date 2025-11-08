@@ -13,8 +13,8 @@ from .models import Job, Issue
 from .config import settings
 
 
-def extract_frames(video_path: str, fps: int = 1, max_frames: int = 60):
-    """Extract high-quality frames from video file"""
+def extract_frames(video_path: str, fps: int = 1, max_frames: int = 30):
+    """Extract frames from video file (memory-optimized for free tier)"""
     try:
         if not os.path.exists(video_path):
             print(f"❌ Video file not found: {video_path}")
@@ -25,9 +25,9 @@ def extract_frames(video_path: str, fps: int = 1, max_frames: int = 60):
             print(f"❌ Could not open video: {video_path}")
             return []
         
-        # Set video capture to highest quality
-        cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1920)
-        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 1080)
+        # Reduce resolution to save memory on free tier (512MB limit)
+        cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
+        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
         
         video_fps = cap.get(cv2.CAP_PROP_FPS) or 30
         total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
