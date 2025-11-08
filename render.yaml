@@ -22,9 +22,9 @@ services:
       - key: API_PREFIX
         value: /api/v1
       - key: FRONTEND_URL
-        value: https://roadcompare.vercel.app
+        value: https://road-compare.vercel.app
       - key: CORS_ORIGINS
-        value: https://roadcompare.vercel.app,https://road-compare.vercel.app
+        value: https://road-compare.vercel.app,https://roadcompare.vercel.app,http://localhost:5173,http://localhost:3000
       - key: FRAME_RATE
         value: 1
       - key: TEMPORAL_PERSIST_N
