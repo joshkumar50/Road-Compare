@@ -26,7 +26,7 @@ def upgrade():
         sa.Column('size', sa.String(), nullable=True),
         sa.Column('data', sa.LargeBinary(), nullable=True),
         sa.Column('data_url', sa.Text(), nullable=True),
-        sa.Column('metadata', sa.JSON(), nullable=True),
+        sa.Column('video_metadata', sa.JSON(), nullable=True),
         sa.Column('created_at', sa.DateTime(), nullable=True),
         sa.PrimaryKeyConstraint('id')
     )

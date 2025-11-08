@@ -1,8 +1,10 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 import os
 
 
 class Settings(BaseModel):
+    model_config = ConfigDict(protected_namespaces=())
+    
     api_prefix: str = os.getenv("API_PREFIX", "/api/v1")
     secret_key: str = os.getenv("SECRET_KEY", "devsecret")
 

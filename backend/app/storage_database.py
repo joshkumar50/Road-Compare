@@ -35,7 +35,7 @@ class VideoStorage(Base):
     size = Column(String)
     data = Column(LargeBinary)  # For small files
     data_url = Column(Text)  # For base64 encoded
-    metadata = Column(JSON)
+    video_metadata = Column(JSON)
     created_at = Column(DateTime, default=datetime.utcnow)
     
 class StorageManager:
@@ -81,7 +81,7 @@ class StorageManager:
                     content_type=content_type,
                     size=str(len(data)),
                     data=None,  # Data is in MongoDB
-                    metadata={"gridfs_id": str(file_id), "storage": "mongodb"}
+                    video_metadata={"gridfs_id": str(file_id), "storage": "mongodb"}
                 )
                 db.add(video)
                 db.commit()
@@ -102,7 +102,7 @@ class StorageManager:
                     size=str(len(data)),
                     data=data,
                     data_url=data_url,
-                    metadata={"storage": "postgresql"}
+                    video_metadata={"storage": "postgresql"}
                 )
                 db.add(video)
                 db.commit()
@@ -128,7 +128,7 @@ class StorageManager:
                 return None
             
             # Check storage location
-            metadata = video.metadata or {}
+            metadata = video.video_metadata or {}
             
             if metadata.get("storage") == "mongodb" and self.gridfs:
                 # Retrieve from MongoDB
@@ -183,7 +183,7 @@ class StorageManager:
                 return False
             
             # Delete from MongoDB if stored there
-            metadata = video.metadata or {}
+            metadata = video.video_metadata or {}
             if metadata.get("storage") == "mongodb" and self.gridfs:
                 gridfs_id = metadata.get("gridfs_id")
                 if gridfs_id:
@@ -218,7 +218,7 @@ class StorageManager:
                     "filename": v.filename,
                     "size": v.size,
                     "created_at": v.created_at.isoformat() if v.created_at else None,
-                    "storage": (v.metadata or {}).get("storage", "unknown")
+                    "storage": (v.video_metadata or {}).get("storage", "unknown")
                 }
                 for v in videos
             ]
@@ -323,10 +323,10 @@ def get_statistics() -> Dict[str, Any]:
             "total_size_mb": total_bytes / (1024 * 1024),
             "storage_types": {
                 "postgresql": db.query(VideoStorage).filter(
-                    VideoStorage.metadata['storage'].astext == 'postgresql'
+                    VideoStorage.video_metadata['storage'].astext == 'postgresql'
                 ).count(),
                 "mongodb": db.query(VideoStorage).filter(
-                    VideoStorage.metadata['storage'].astext == 'mongodb'
+                    VideoStorage.video_metadata['storage'].astext == 'mongodb'
                 ).count() if storage.gridfs else 0
             }
         }
