@@ -60,11 +60,18 @@ async def create_job(
     metadata: str | None = None,
     db: Session = Depends(get_db),
 ):
+    """Create a new video analysis job"""
+    print(f"📥 Received job creation request")
+    print(f"   - Base video: {base_video.filename if base_video else 'None'}")
+    print(f"   - Present video: {present_video.filename if present_video else 'None'}")
+    print(f"   - Sample rate: {sample_rate}")
+    
     try:
         job_id = str(uuid.uuid4())
         
         # Validate videos are provided
         if not base_video or not present_video:
+            print(f"❌ Validation failed: Missing videos")
             raise HTTPException(400, "Both base_video and present_video are required")
         
         # If direct upload provided, stream to object storage

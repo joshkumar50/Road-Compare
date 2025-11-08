@@ -4,9 +4,45 @@ from .config import settings
 from .routes import api_router
 import threading
 import os
+import logging
 
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
-app = FastAPI(title="RoadCompare API", version="1.0.0")
+app = FastAPI(
+    title="RoadCompare API", 
+    version="1.0.0",
+    description="AI-powered road infrastructure analysis API"
+)
+
+# Startup event to verify connections
+@app.on_event("startup")
+async def startup_event():
+    """Verify database and Redis connections on startup"""
+    logger.info("🚀 Starting RoadCompare API...")
+    
+    # Test database connection
+    try:
+        from .db import engine
+        from sqlalchemy import text
+        with engine.connect() as conn:
+            conn.execute(text("SELECT 1"))
+        logger.info("✅ Database connection successful")
+    except Exception as e:
+        logger.error(f"❌ Database connection failed: {e}")
+        raise
+    
+    # Test Redis connection (non-blocking)
+    try:
+        from redis import Redis
+        redis_conn = Redis.from_url(settings.redis_url, socket_connect_timeout=2)
+        redis_conn.ping()
+        logger.info("✅ Redis connection successful")
+    except Exception as e:
+        logger.warning(f"⚠️ Redis connection failed (non-critical): {e}")
+    
+    logger.info("✅ RoadCompare API started successfully")
 
 # Build allowed origins list from config
 allowed_origins = [origin.strip() for origin in settings.cors_origins]
