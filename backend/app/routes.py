@@ -184,37 +184,68 @@ async def create_job(
 
         # Parse and validate metadata
         meta_json = {}
-        if metadata:
+        if metadata and metadata.strip():
             try:
                 meta_json = json.loads(metadata)
                 if not isinstance(meta_json, dict):
                     raise ValueError("Metadata must be a JSON object")
             except json.JSONDecodeError as e:
                 logger.error(f"❌ Invalid metadata JSON: {e}")
-                raise HTTPException(400, f"Invalid metadata JSON: {str(e)}")
+                # Don't fail the upload for invalid metadata, just use empty dict
+                logger.warning(f"⚠️ Using empty metadata due to parse error")
+                meta_json = {}
 
-        job = Job(id=job_id, status="queued", metadata_json=meta_json, sample_rate=sample_rate)
-        db.add(job)
-        db.commit()
-        logger.info(f"✅ Job {job_id} created in database")
+        # Create job in database
+        try:
+            job = Job(id=job_id, status="queued", metadata_json=meta_json, sample_rate=sample_rate)
+            db.add(job)
+            db.commit()
+            db.refresh(job)
+            logger.info(f"✅ Job {job_id} created in database")
+        except Exception as e:
+            db.rollback()
+            logger.error(f"❌ Failed to create job in database: {e}")
+            raise HTTPException(500, f"Failed to create job in database: {str(e)}")
 
-        enqueue_job({
-            "job_id": job_id,
-            "base_key": base_key,
-            "present_key": present_key,
-            "sample_rate": sample_rate,
-            "metadata": meta_json,
-        })
-        logger.info(f"✅ Job {job_id} enqueued for processing")
+        # Enqueue job for processing
+        try:
+            enqueue_job({
+                "job_id": job_id,
+                "base_key": base_key,
+                "present_key": present_key,
+                "sample_rate": sample_rate,
+                "metadata": meta_json,
+            })
+            logger.info(f"✅ Job {job_id} enqueued for processing")
+        except Exception as e:
+            logger.warning(f"⚠️ Failed to enqueue job (will process synchronously): {e}")
 
         return {"job_id": job_id, "status": "queued", "message": "Job created successfully"}
         
-    except HTTPException:
-        raise
+    except HTTPException as he:
+        # Clean up uploaded files on error
+        try:
+            if 'job_id' in locals():
+                from .storage_hybrid import delete_prefix
+                delete_prefix(f"jobs/{job_id}")
+                logger.info(f"🗑️ Cleaned up files for failed job {job_id}")
+        except:
+            pass
+        raise he
     except Exception as e:
         logger.error(f"❌ Error creating job: {type(e).__name__}: {e}")
         import traceback
         traceback.print_exc()
+        
+        # Clean up uploaded files on error
+        try:
+            if 'job_id' in locals():
+                from .storage_hybrid import delete_prefix
+                delete_prefix(f"jobs/{job_id}")
+                logger.info(f"🗑️ Cleaned up files for failed job {job_id}")
+        except:
+            pass
+            
         raise HTTPException(500, f"Failed to create job: {str(e)}")
 
 

@@ -43,21 +43,24 @@ def put_bytes(object_name: str, data: bytes, content_type: str = "application/oc
         
         # Store metadata in database if available
         try:
-            from .db import get_db
+            from .db import SessionLocal
             from .models import VideoMetadata
-            db = next(get_db())
             
-            metadata = VideoMetadata(
-                key=object_name,
-                filename=Path(object_name).name,
-                content_type=content_type,
-                size=len(data),
-                storage_path=str(file_path),
-                created_at=datetime.utcnow()
-            )
-            db.add(metadata)
-            db.commit()
-            logger.info(f"✅ Metadata saved for {object_name}")
+            db = SessionLocal()
+            try:
+                metadata = VideoMetadata(
+                    key=object_name,
+                    filename=Path(object_name).name,
+                    content_type=content_type,
+                    size=len(data),
+                    storage_path=str(file_path),
+                    created_at=datetime.utcnow()
+                )
+                db.add(metadata)
+                db.commit()
+                logger.info(f"✅ Metadata saved for {object_name}")
+            finally:
+                db.close()
         except Exception as e:
             logger.warning(f"⚠️ Could not save metadata to database: {e}")
             # Continue anyway - file is saved
@@ -77,15 +80,18 @@ def get_bytes(object_name: str) -> bytes:
         
         # Fallback to database if file not found
         try:
-            from .db import get_db
+            from .db import SessionLocal
             from .models import VideoMetadata
-            db = next(get_db())
             
-            metadata = db.query(VideoMetadata).filter_by(key=object_name).first()
-            if metadata and metadata.storage_path:
-                alt_path = Path(metadata.storage_path)
-                if alt_path.exists():
-                    return alt_path.read_bytes()
+            db = SessionLocal()
+            try:
+                metadata = db.query(VideoMetadata).filter_by(key=object_name).first()
+                if metadata and metadata.storage_path:
+                    alt_path = Path(metadata.storage_path)
+                    if alt_path.exists():
+                        return alt_path.read_bytes()
+            finally:
+                db.close()
         except Exception as e:
             logger.warning(f"⚠️ Could not check database for {object_name}: {e}")
         
@@ -107,13 +113,16 @@ def delete_prefix(prefix: str):
         
         # Also clean up database entries
         try:
-            from .db import get_db
+            from .db import SessionLocal
             from .models import VideoMetadata
-            db = next(get_db())
             
-            db.query(VideoMetadata).filter(VideoMetadata.key.like(f"{prefix}%")).delete()
-            db.commit()
-            logger.info(f"✅ Cleaned up database entries for prefix: {prefix}")
+            db = SessionLocal()
+            try:
+                db.query(VideoMetadata).filter(VideoMetadata.key.like(f"{prefix}%")).delete(synchronize_session=False)
+                db.commit()
+                logger.info(f"✅ Cleaned up database entries for prefix: {prefix}")
+            finally:
+                db.close()
         except Exception as e:
             logger.warning(f"⚠️ Could not clean database entries: {e}")
             

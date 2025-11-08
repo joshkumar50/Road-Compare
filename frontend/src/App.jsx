@@ -51,6 +51,17 @@ function Upload({ onJobCreated }) {
       return
     }
     
+    // Validate file sizes (100MB limit)
+    const maxSize = 100 * 1024 * 1024 // 100MB
+    if (base.size > maxSize) {
+      setError(`Base video is too large (${(base.size / 1024 / 1024).toFixed(1)}MB). Maximum size is 100MB.`)
+      return
+    }
+    if (present.size > maxSize) {
+      setError(`Present video is too large (${(present.size / 1024 / 1024).toFixed(1)}MB). Maximum size is 100MB.`)
+      return
+    }
+    
     try {
       setLoading(true)
       setError(null)
@@ -68,7 +79,18 @@ function Upload({ onJobCreated }) {
       setPresent(null)
       setMeta('{}')
     } catch (err) {
-      setError(err.response?.data?.detail || 'Failed to upload videos')
+      console.error('Upload error:', err)
+      let errorMsg = 'Failed to upload videos'
+      
+      if (err.response?.data?.detail) {
+        errorMsg = err.response.data.detail
+      } else if (err.response?.data?.message) {
+        errorMsg = err.response.data.message
+      } else if (err.message) {
+        errorMsg = `Upload error: ${err.message}`
+      }
+      
+      setError(errorMsg)
     } finally {
       setLoading(false)
     }
