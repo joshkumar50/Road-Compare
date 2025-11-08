@@ -8,7 +8,13 @@ from .tasks import enqueue_job
 from .db import get_db, Base, engine
 from .models import Job, Issue, Feedback
 from .config import settings
-from .storage_simple import presign_put, presign_get, put_bytes, USE_LOCAL_STORAGE
+import os
+
+# Choose storage backend based on environment
+if os.getenv("USE_DATABASE_STORAGE", "true").lower() == "true":
+    from .storage_database import put_bytes, presign_put
+else:
+    from .storage_simple import put_bytes, presign_put
 import uuid
 import csv
 import io
@@ -192,6 +198,54 @@ def report_pdf(job_id: str, db: Session = Depends(get_db)):
     from fastapi.responses import Response
 
     return Response(content=pdf_bytes, media_type="application/pdf")
+
+
+@api_router.get("/storage/stats")
+def get_storage_stats(db: Session = Depends(get_db)):
+    """Get storage statistics"""
+    if os.getenv("USE_DATABASE_STORAGE", "true").lower() == "true":
+        from .storage_database import get_statistics
+        return get_statistics()
+    else:
+        return {"error": "Database storage not enabled"}
+
+
+@api_router.delete("/storage/cleanup")
+def cleanup_old_storage(days: int = 7, db: Session = Depends(get_db)):
+    """Delete videos and jobs older than specified days"""
+    from datetime import datetime, timedelta
+    
+    cutoff_date = datetime.utcnow() - timedelta(days=days)
+    
+    # Delete old jobs and their issues
+    old_jobs = db.query(Job).filter(Job.created_at < cutoff_date).all()
+    deleted_jobs = len(old_jobs)
+    
+    for job in old_jobs:
+        # Delete issues
+        db.query(Issue).filter(Issue.job_id == job.id).delete()
+        # Delete job
+        db.delete(job)
+    
+    db.commit()
+    
+    # Delete old videos if using database storage
+    deleted_videos = 0
+    if os.getenv("USE_DATABASE_STORAGE", "true").lower() == "true":
+        from .storage_database import storage
+        videos = storage.list_videos()
+        for video in videos:
+            if video.get("created_at"):
+                video_date = datetime.fromisoformat(video["created_at"])
+                if video_date < cutoff_date:
+                    if storage.delete_video(video["key"]):
+                        deleted_videos += 1
+    
+    return {
+        "deleted_jobs": deleted_jobs,
+        "deleted_videos": deleted_videos,
+        "cutoff_date": cutoff_date.isoformat()
+    }
 
 
 @api_router.delete("/jobs/{job_id}")

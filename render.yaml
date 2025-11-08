@@ -49,6 +49,8 @@ services:
         sync: false
       - key: MONGO_DB
         value: roadcompare
+      - key: USE_DATABASE_STORAGE
+        value: true
     healthCheckPath: /health
 
   # Note: Worker runs in background thread within the API service (free alternative)

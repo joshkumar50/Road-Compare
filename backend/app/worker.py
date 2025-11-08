@@ -409,10 +409,18 @@ def run_pipeline(job_id: str, payload: dict):
         if not base_key or not present_key:
             raise ValueError("Missing video keys in payload")
         
-        # For demo, use uploaded files directly
-        from .storage_simple import presign_get
-        base_path = presign_get(base_key)
-        present_path = presign_get(present_key)
+        # Get videos from database storage
+        if os.getenv("USE_DATABASE_STORAGE", "true").lower() == "true":
+            from .storage_database import presign_get, save_to_temp_file, cleanup_temp_file
+            # Save to temp files for OpenCV processing
+            base_path = save_to_temp_file(base_key)
+            present_path = save_to_temp_file(present_key)
+            temp_files = [base_path, present_path]
+        else:
+            from .storage_simple import presign_get
+            base_path = presign_get(base_key)
+            present_path = presign_get(present_key)
+            temp_files = []
         
         print(f"[Job {job_id}] Extracting frames from videos...")
         
@@ -506,6 +514,15 @@ def run_pipeline(job_id: str, payload: dict):
             db.commit()
         return False
     finally:
+        # Clean up temporary files if using database storage
+        if 'temp_files' in locals():
+            for temp_file in temp_files:
+                try:
+                    if os.path.exists(temp_file):
+                        os.remove(temp_file)
+                        print(f"[Job {job_id}] Cleaned up temp file: {temp_file}")
+                except Exception as e:
+                    print(f"[Job {job_id}] Could not clean up {temp_file}: {e}")
         db.close()
 
 
