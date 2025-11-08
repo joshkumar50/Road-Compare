@@ -65,16 +65,22 @@ allowed_origins = list(set(allowed_origins))
 
 print(f"✅ CORS allowed origins: {allowed_origins}")
 
-# More permissive CORS for production debugging
+# CORS configuration for production
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Allow all origins temporarily
-    allow_credentials=False,  # Must be False when allow_origins is "*"
+    allow_origins=allowed_origins,  # Use configured origins
+    allow_credentials=False,
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
     allow_headers=["*"],
     expose_headers=["*"],
     max_age=3600,
 )
+
+# Add fallback OPTIONS handler for CORS preflight
+@app.options("/{full_path:path}")
+async def options_handler(full_path: str):
+    """Handle CORS preflight requests"""
+    return {"message": "OK"}
 
 
 @app.get("/")
