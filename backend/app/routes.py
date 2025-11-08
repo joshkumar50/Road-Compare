@@ -1,5 +1,5 @@
 import json
-from fastapi import APIRouter, UploadFile, File, Depends, HTTPException
+from fastapi import APIRouter, UploadFile, File, Form, Depends, HTTPException
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 from typing import List
@@ -91,10 +91,10 @@ def presign_upload(data: PresignRequest):
 
 @api_router.post("/jobs")
 async def create_job(
-    sample_rate: int = 1,
-    base_video: UploadFile | None = File(default=None),
-    present_video: UploadFile | None = File(default=None),
-    metadata: str | None = None,
+    base_video: UploadFile = File(...),
+    present_video: UploadFile = File(...),
+    sample_rate: int = Form(1),
+    metadata: str = Form(""),
     db: Session = Depends(get_db),
 ):
     """Create a new video analysis job with comprehensive validation"""
@@ -105,6 +105,7 @@ async def create_job(
     logger.info(f"   - Base video: {base_video.filename if base_video else 'None'}")
     logger.info(f"   - Present video: {present_video.filename if present_video else 'None'}")
     logger.info(f"   - Sample rate: {sample_rate}")
+    logger.info(f"   - Metadata: {metadata}")
     
     try:
         job_id = str(uuid.uuid4())

@@ -6,7 +6,7 @@ const API = import.meta.env.VITE_API || 'http://localhost:8000/api/v1'
 
 // Configure axios defaults for better CORS handling
 // Note: withCredentials removed to prevent CORS issues
-axios.defaults.headers.common['Content-Type'] = 'application/json'
+// Don't set Content-Type globally - let axios handle it for FormData
 
 // Add axios interceptor for better error handling
 axios.interceptors.response.use(
@@ -59,6 +59,8 @@ function Upload({ onJobCreated }) {
       form.append('present_video', present)
       form.append('metadata', meta)
       form.append('sample_rate', '1')
+      
+      // Let axios automatically set Content-Type with boundary for FormData
       const res = await axios.post(`${API}/jobs`, form)
       setJobId(res.data.job_id)
       onJobCreated && onJobCreated(res.data.job_id)
