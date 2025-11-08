@@ -1,8 +1,10 @@
 {
-  "buildCommand": "cd frontend && npm ci && npm run build",
-  "outputDirectory": "frontend/dist",
+  "version": 2,
+  "buildCommand": "npm run build",
+  "outputDirectory": "dist",
+  "installCommand": "npm install",
   "framework": "vite",
-  "installCommand": "cd frontend && npm install",
+  "rootDirectory": "frontend",
   "env": {
     "VITE_API": "https://roadcompare-api.onrender.com/api/v1"
   },
