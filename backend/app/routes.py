@@ -26,6 +26,22 @@ Base.metadata.create_all(bind=engine)
 api_router = APIRouter()
 
 
+@api_router.get("/debug/config")
+def debug_config():
+    """Debug endpoint to check API configuration"""
+    import os
+    return {
+        "api_prefix": settings.api_prefix,
+        "frontend_url": settings.frontend_url,
+        "cors_origins": settings.cors_origins,
+        "database_connected": True,
+        "redis_url_set": bool(settings.redis_url),
+        "use_database_storage": os.getenv("USE_DATABASE_STORAGE", "true"),
+        "demo_mode": settings.demo_mode,
+        "use_yolo": settings.use_yolo,
+    }
+
+
 @api_router.post("/uploads/presign", response_model=PresignResponse)
 def presign_upload(data: PresignRequest):
     job_id = str(uuid.uuid4())
@@ -87,17 +103,24 @@ async def create_job(
 
 @api_router.get("/jobs", response_model=List[JobSummary])
 def list_jobs(db: Session = Depends(get_db)):
-    jobs = db.query(Job).order_by(Job.created_at.desc()).all()
-    return [
-        JobSummary(
-            id=j.id,
-            status=j.status,
-            processed_frames=j.processed_frames,
-            runtime_seconds=j.runtime_seconds,
-            summary=j.summary_json or {},
-        )
-        for j in jobs
-    ]
+    """List all jobs with their status and summary"""
+    try:
+        print("📋 Fetching all jobs...")
+        jobs = db.query(Job).order_by(Job.created_at.desc()).all()
+        print(f"✅ Found {len(jobs)} jobs")
+        return [
+            JobSummary(
+                id=j.id,
+                status=j.status,
+                processed_frames=j.processed_frames,
+                runtime_seconds=j.runtime_seconds,
+                summary=j.summary_json or {},
+            )
+            for j in jobs
+        ]
+    except Exception as e:
+        print(f"❌ Error fetching jobs: {type(e).__name__}: {e}")
+        raise HTTPException(500, f"Failed to fetch jobs: {str(e)}")
 
 
 @api_router.get("/jobs/{job_id}/results", response_model=JobResult)

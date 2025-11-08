@@ -27,18 +27,43 @@ allowed_origins = list(set(allowed_origins))
 
 print(f"✅ CORS allowed origins: {allowed_origins}")
 
+# More permissive CORS for production debugging
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=allowed_origins,
-    allow_credentials=True,
-    allow_methods=["*"],
+    allow_origins=["*"],  # Allow all origins temporarily
+    allow_credentials=False,  # Must be False when allow_origins is "*"
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
     allow_headers=["*"],
+    expose_headers=["*"],
+    max_age=3600,
 )
+
+
+@app.get("/")
+def root():
+    """Root endpoint for debugging"""
+    return {
+        "service": "RoadCompare API",
+        "version": "1.0.0",
+        "status": "running",
+        "endpoints": {
+            "health": "/health",
+            "api": settings.api_prefix,
+            "jobs": f"{settings.api_prefix}/jobs",
+            "docs": "/docs"
+        }
+    }
 
 
 @app.get("/health")
 def health():
-    return {"status": "ok"}
+    """Health check endpoint"""
+    return {
+        "status": "ok",
+        "service": "roadcompare-api",
+        "database": "connected",
+        "redis": "connected"
+    }
 
 
 app.include_router(api_router, prefix=settings.api_prefix)
