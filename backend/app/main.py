@@ -78,20 +78,8 @@ app.add_middleware(
     max_age=86400,  # Cache preflight for 24 hours
 )
 
-# Add explicit OPTIONS handler for CORS preflight
-@app.options("/{full_path:path}")
-async def options_handler(full_path: str):
-    """Handle CORS preflight requests explicitly"""
-    from fastapi.responses import Response
-    return Response(
-        status_code=200,
-        headers={
-            "Access-Control-Allow-Origin": "*",
-            "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS, PATCH, HEAD",
-            "Access-Control-Allow-Headers": "*",
-            "Access-Control-Max-Age": "86400",
-        }
-    )
+# Note: FastAPI CORS middleware automatically handles OPTIONS preflight requests
+# No need for explicit OPTIONS handler
 
 
 @app.get("/")
