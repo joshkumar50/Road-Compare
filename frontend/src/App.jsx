@@ -8,17 +8,20 @@ const API = import.meta.env.VITE_API || 'http://localhost:8000/api/v1'
 // Note: withCredentials removed to prevent CORS issues
 // Don't set Content-Type globally - let axios handle it for FormData
 
-// Add axios interceptor for better error handling
+// Add axios interceptor for lightweight error logging (avoid noisy console)
 axios.interceptors.response.use(
   response => response,
   error => {
-    console.error('API Error:', {
-      url: error.config?.url,
-      method: error.config?.method,
-      status: error.response?.status,
-      message: error.message,
-      data: error.response?.data
-    })
+    const url = error.config?.url || ''
+    const isPolling = url.endsWith('/jobs') && error.config?.method === 'get'
+    if (!isPolling) {
+      console.warn('API issue:', {
+        url,
+        method: error.config?.method,
+        status: error.response?.status,
+        message: error.message
+      })
+    }
     return Promise.reject(error)
   }
 )
@@ -71,15 +74,18 @@ function Upload({ onJobCreated }) {
       const { job_id, base_key, present_key } = init.data
 
       const uploadFileInChunks = async (file, key) => {
-        const CHUNK = 2 * 1024 * 1024 // 2MB
+        const CHUNK = 1 * 1024 * 1024 // 1MB (safer for edge)
         let idx = 0
+        const total = Math.ceil(file.size / CHUNK)
         for (let offset = 0; offset < file.size; offset += CHUNK) {
           const blob = file.slice(offset, Math.min(offset + CHUNK, file.size))
           const buf = await blob.arrayBuffer()
-          await axios.post(`${API}/uploads/chunk`, new Uint8Array(buf), {
-            params: { key, idx, total: Math.ceil(file.size / CHUNK) },
+          // Retry each chunk with exponential backoff
+          await retryRequest(() => axios.post(`${API}/uploads/chunk`, new Uint8Array(buf), {
+            params: { key, idx, total },
             headers: { 'Content-Type': 'application/octet-stream' },
-          })
+            timeout: 30000
+          }), 3, 800)
           idx++
         }
       }
