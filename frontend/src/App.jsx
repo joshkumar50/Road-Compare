@@ -65,16 +65,40 @@ function Upload({ onJobCreated }) {
     try {
       setLoading(true)
       setError(null)
-      const form = new FormData()
-      form.append('base_video', base)
-      form.append('present_video', present)
-      form.append('metadata', meta)
-      form.append('sample_rate', '1')
-      
-      // Let axios automatically set Content-Type with boundary for FormData
-      const res = await axios.post(`${API}/jobs`, form)
-      setJobId(res.data.job_id)
-      onJobCreated && onJobCreated(res.data.job_id)
+
+      // Initialize chunked upload session
+      const init = await axios.post(`${API}/uploads/init`)
+      const { job_id, base_key, present_key } = init.data
+
+      const uploadFileInChunks = async (file, key) => {
+        const CHUNK = 2 * 1024 * 1024 // 2MB
+        let idx = 0
+        for (let offset = 0; offset < file.size; offset += CHUNK) {
+          const blob = file.slice(offset, Math.min(offset + CHUNK, file.size))
+          const buf = await blob.arrayBuffer()
+          await axios.post(`${API}/uploads/chunk`, new Uint8Array(buf), {
+            params: { key, idx, total: Math.ceil(file.size / CHUNK) },
+            headers: { 'Content-Type': 'application/octet-stream' },
+          })
+          idx++
+        }
+      }
+
+      // Upload both files sequentially (edge-safe)
+      await uploadFileInChunks(base, base_key)
+      await uploadFileInChunks(present, present_key)
+
+      // Finalize and create job
+      const complete = await axios.post(`${API}/uploads/complete`, {
+        job_id,
+        base_key,
+        present_key,
+        sample_rate: 1,
+        metadata: meta ? JSON.parse(meta) : {}
+      })
+
+      setJobId(complete.data.job_id)
+      onJobCreated && onJobCreated(complete.data.job_id)
       setBase(null)
       setPresent(null)
       setMeta('{}')

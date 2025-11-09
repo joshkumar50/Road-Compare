@@ -29,6 +29,92 @@ Base.metadata.create_all(bind=engine)
 
 api_router = APIRouter()
 
+# -------- Chunked upload (edge-safe) --------
+from fastapi import Request
+from pathlib import Path
+
+CHUNK_SIZE_LIMIT = 2 * 1024 * 1024  # 2MB per chunk
+
+@api_router.post("/uploads/init")
+def uploads_init():
+    """Initialize a chunked upload session and return storage keys."""
+    import uuid
+    job_id = str(uuid.uuid4())
+    base_key = f"jobs/{job_id}/base/video.mp4"
+    present_key = f"jobs/{job_id}/present/video.mp4"
+    return {"job_id": job_id, "base_key": base_key, "present_key": present_key}
+
+@api_router.post("/uploads/chunk")
+async def upload_chunk(request: Request, key: str, idx: int, total: int):
+    """Receive a chunk and append to temp file. All chunks must be sequential."""
+    import logging
+    logger = logging.getLogger(__name__)
+    try:
+        # Read raw body
+        body = await request.body()
+        if not body:
+            raise HTTPException(400, "Empty chunk")
+        if len(body) > CHUNK_SIZE_LIMIT:
+            raise HTTPException(400, "Chunk too large")
+
+        # Resolve storage path
+        try:
+            from .storage_hybrid import presign_put
+        except Exception:
+            from .storage_simple import presign_put
+        file_path = Path(presign_put(key))
+        file_path.parent.mkdir(parents=True, exist_ok=True)
+
+        # If first chunk, reset file
+        mode = "ab"
+        if idx == 0 and file_path.exists():
+            file_path.unlink()
+            mode = "ab"
+        
+        with open(file_path, mode) as f:
+            f.write(body)
+
+        logger.info(f"⬆️ Chunk {idx+1}/{total} written for {key} ({len(body)} bytes)")
+        return {"ok": True, "received": len(body), "index": idx}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Chunk upload failed: {e}")
+        raise HTTPException(500, f"Chunk upload failed: {str(e)}")
+
+@api_router.post("/uploads/complete")
+def upload_complete(payload: dict, db: Session = Depends(get_db)):
+    """Finalize upload and create a job using uploaded keys."""
+    import logging
+    logger = logging.getLogger(__name__)
+
+    job_id = payload.get("job_id")
+    base_key = payload.get("base_key")
+    present_key = payload.get("present_key")
+    sample_rate = int(payload.get("sample_rate", 1))
+    metadata = payload.get("metadata") or {}
+
+    if not all([job_id, base_key, present_key]):
+        raise HTTPException(400, "Missing job_id/base_key/present_key")
+
+    # Create job
+    job = Job(id=job_id, status="queued", metadata_json=metadata, sample_rate=sample_rate)
+    db.add(job)
+    db.commit()
+
+    try:
+        enqueue_job({
+            "job_id": job_id,
+            "base_key": base_key,
+            "present_key": present_key,
+            "sample_rate": sample_rate,
+            "metadata": metadata,
+        })
+    except Exception as e:
+        logger.warning(f"Queue failed, will process synchronously: {e}")
+
+    return {"job_id": job_id, "status": "queued"}
+
 
 @api_router.get("/debug/config")
 def debug_config():
