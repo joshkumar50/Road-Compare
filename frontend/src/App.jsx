@@ -75,6 +75,7 @@ function Upload({ onJobCreated }) {
 
       const uploadFileInChunks = async (file, key) => {
         const CHUNK = 1 * 1024 * 1024 // 1MB (safer for edge)
+        const THROTTLE_MS = 120 // small delay to avoid proxy overload
         let idx = 0
         const total = Math.ceil(file.size / CHUNK)
         for (let offset = 0; offset < file.size; offset += CHUNK) {
@@ -85,16 +86,16 @@ function Upload({ onJobCreated }) {
           await retryRequest(() => axios.post(`${API}/uploads/chunk`, form, {
             params: { key, idx, total },
             timeout: 30000
-          }), 3, 800)
+          }), 5, 600)
           idx++
+          // Brief throttle to avoid 502 from gateway when many requests in a row
+          await new Promise(r => setTimeout(r, THROTTLE_MS))
         }
       }
 
-      // Upload both files in PARALLEL (edge-safe per file; sequential within each file)
-      await Promise.all([
-        uploadFileInChunks(base, base_key),
-        uploadFileInChunks(present, present_key)
-      ])
+      // Upload files SEQUENTIALLY to minimize edge 502s
+      await uploadFileInChunks(base, base_key)
+      await uploadFileInChunks(present, present_key)
 
       // Finalize and create job
       const complete = await axios.post(`${API}/uploads/complete`, {
