@@ -48,22 +48,33 @@ def uploads_init():
 async def upload_chunk(key: str, idx: int, total: int, chunk: UploadFile = File(...)):
     """Receive a chunk via multipart/form-data to avoid CORS preflight.
     All chunks must be sequential within a file.
+    Optimized for Render free tier with faster response times.
     """
     import logging
+    import asyncio
     logger = logging.getLogger(__name__)
+    
+    start_time = asyncio.get_event_loop().time()
+    
     try:
-        # Read file bytes
-        body = await chunk.read()
+        # Read file bytes with timeout
+        try:
+            body = await asyncio.wait_for(chunk.read(), timeout=25.0)  # 25s timeout
+        except asyncio.TimeoutError:
+            logger.error(f"Chunk {idx} read timeout")
+            raise HTTPException(408, "Chunk read timeout")
+            
         if not body:
             raise HTTPException(400, "Empty chunk")
         if len(body) > CHUNK_SIZE_LIMIT:
             raise HTTPException(400, "Chunk too large")
 
-        # Resolve storage path
+        # Resolve storage path quickly
         try:
             from .storage_hybrid import presign_put
         except Exception:
             from .storage_simple import presign_put
+            
         file_path = Path(presign_put(key))
         file_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -73,15 +84,18 @@ async def upload_chunk(key: str, idx: int, total: int, chunk: UploadFile = File(
             file_path.unlink()
             mode = "ab"
         
+        # Write file with minimal I/O
         with open(file_path, mode) as f:
             f.write(body)
 
-        logger.info(f"⬆️ Chunk {idx+1}/{total} written for {key} ({len(body)} bytes)")
-        return {"ok": True, "received": len(body), "index": idx}
+        elapsed = asyncio.get_event_loop().time() - start_time
+        logger.info(f"⬆️ Chunk {idx+1}/{total} for {key}: {len(body)} bytes in {elapsed:.2f}s")
+        
+        return {"ok": True, "received": len(body), "index": idx, "elapsed_ms": int(elapsed * 1000)}
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Chunk upload failed: {e}")
+        logger.error(f"Chunk upload failed for {key} idx={idx}: {type(e).__name__}: {e}")
         raise HTTPException(500, f"Chunk upload failed: {str(e)}")
 
 @api_router.post("/uploads/complete")
@@ -234,7 +248,7 @@ async def create_job(
         
         # Stream videos to storage with chunked reading for memory efficiency
         max_size = 100 * 1024 * 1024  # 100MB limit for free tier
-        chunk_size = 2 * 1024 * 1024  # 2MB chunks for faster upload
+        chunk_size = 5 * 1024 * 1024  # 5MB chunks for faster upload (larger chunks = fewer network round trips)
         
         import asyncio
         
@@ -244,21 +258,21 @@ async def create_job(
             chunks = []
             try:
                 while True:
-                    # Read with 30 second timeout per chunk
-                    chunk = await asyncio.wait_for(video.read(chunk_size), timeout=30.0)
+                    # Read with 40 second timeout per chunk (more generous for direct upload)
+                    chunk = await asyncio.wait_for(video.read(chunk_size), timeout=40.0)
                     if not chunk:
                         break
                     size += len(chunk)
                     if size > max_size:
                         raise HTTPException(400, f"{name} video exceeds maximum size of 100MB")
                     chunks.append(chunk)
-                    if len(chunks) % 10 == 0:  # Log every 20MB
+                    if len(chunks) % 5 == 0:  # Log every 25MB
                         logger.info(f"   {name}: {size / (1024*1024):.1f} MB uploaded...")
                 return b''.join(chunks), size
             except asyncio.TimeoutError:
-                raise HTTPException(504, f"{name} video upload timed out. Please try with a smaller file.")
+                raise HTTPException(504, f"{name} video upload timed out. Please try with a smaller file or use chunked upload.")
         
-        # Read both videos concurrently for speed
+        # Read both videos concurrently for speed (works well for smaller files)
         try:
             (base_content, base_size), (present_content, present_size) = await asyncio.gather(
                 read_video_with_timeout(base_video, max_size, chunk_size, "Base"),
@@ -266,7 +280,7 @@ async def create_job(
             )
             logger.info(f"✅ Both videos read: Base {base_size/(1024*1024):.1f}MB, Present {present_size/(1024*1024):.1f}MB")
         except asyncio.TimeoutError:
-            raise HTTPException(504, "Video upload timed out. Please try with smaller files.")
+            raise HTTPException(504, "Video upload timed out. Please try with smaller files or use chunked upload.")
         
         # Store videos
         try:

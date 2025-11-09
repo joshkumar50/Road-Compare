@@ -151,6 +151,18 @@ def health():
     return health_status
 
 
+@app.get("/cors-check")
+def cors_check():
+    """Simple CORS test endpoint - should include CORS headers in response"""
+    from datetime import datetime
+    return {
+        "cors": "enabled",
+        "origin": "*",
+        "timestamp": datetime.utcnow().isoformat() + "Z",
+        "message": "If you can see this from the browser console, CORS is working!"
+    }
+
+
 app.include_router(api_router, prefix=settings.api_prefix)
 
 

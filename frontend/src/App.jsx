@@ -54,8 +54,10 @@ function Upload({ onJobCreated }) {
       return
     }
     
-    // Validate file sizes (100MB limit)
-    const maxSize = 100 * 1024 * 1024 // 100MB
+    // Validate file sizes - recommend 50MB for stability on free tier
+    const maxSize = 100 * 1024 * 1024 // 100MB hard limit
+    const recommendedSize = 50 * 1024 * 1024 // 50MB recommended
+    
     if (base.size > maxSize) {
       setError(`Base video is too large (${(base.size / 1024 / 1024).toFixed(1)}MB). Maximum size is 100MB.`)
       return
@@ -65,46 +67,100 @@ function Upload({ onJobCreated }) {
       return
     }
     
+    const totalSize = base.size + present.size
+    const useDirectUpload = totalSize < 30 * 1024 * 1024 // Use direct upload for files < 30MB total
+    
     try {
       setLoading(true)
       setError(null)
 
-      // Initialize chunked upload session
-      const init = await axios.post(`${API}/uploads/init`)
+      // For smaller files, use direct upload (faster, more reliable)
+      if (useDirectUpload) {
+        console.log('Using direct upload for small files')
+        const form = new FormData()
+        form.append('base_video', base)
+        form.append('present_video', present)
+        form.append('sample_rate', '1')
+        form.append('metadata', meta || '{}')
+        
+        const result = await retryRequest(() => 
+          axios.post(`${API}/jobs`, form, {
+            timeout: 90000, // 90 second timeout
+            headers: { 'Content-Type': 'multipart/form-data' }
+          }),
+          3,
+          2000
+        )
+        
+        setJobId(result.data.job_id)
+        onJobCreated && onJobCreated(result.data.job_id)
+        setBase(null)
+        setPresent(null)
+        setMeta('{}')
+        return
+      }
+
+      // For larger files, use chunked upload
+      console.log('Using chunked upload for large files')
+      const init = await retryRequest(() => axios.post(`${API}/uploads/init`), 3, 1000)
       const { job_id, base_key, present_key } = init.data
 
-      const uploadFileInChunks = async (file, key) => {
-        const CHUNK = 1 * 1024 * 1024 // 1MB (safer for edge)
-        const THROTTLE_MS = 120 // small delay to avoid proxy overload
-        let idx = 0
+      const uploadFileInChunks = async (file, key, name) => {
+        const CHUNK = 1 * 1024 * 1024 // 1MB chunks
+        const THROTTLE_MS = 200 // Increased throttle to reduce gateway load
         const total = Math.ceil(file.size / CHUNK)
-        for (let offset = 0; offset < file.size; offset += CHUNK) {
+        
+        console.log(`Uploading ${name}: ${total} chunks`)
+        
+        for (let idx = 0; idx < total; idx++) {
+          const offset = idx * CHUNK
           const blob = file.slice(offset, Math.min(offset + CHUNK, file.size))
           const form = new FormData()
           form.append('chunk', blob, `chunk-${idx}`)
-          // Retry each chunk with exponential backoff; no custom headers (avoids preflight)
-          await retryRequest(() => axios.post(`${API}/uploads/chunk`, form, {
-            params: { key, idx, total },
-            timeout: 30000
-          }), 5, 600)
-          idx++
-          // Brief throttle to avoid 502 from gateway when many requests in a row
-          await new Promise(r => setTimeout(r, THROTTLE_MS))
+          
+          try {
+            await retryRequest(
+              () => axios.post(`${API}/uploads/chunk`, form, {
+                params: { key, idx, total },
+                timeout: 30000,
+                headers: { 'Content-Type': 'multipart/form-data' }
+              }),
+              3, // Reduced retries to fail faster
+              1000
+            )
+            
+            // Log progress every 10 chunks
+            if ((idx + 1) % 10 === 0 || idx === total - 1) {
+              console.log(`${name}: ${idx + 1}/${total} chunks uploaded`)
+            }
+          } catch (err) {
+            console.error(`Failed to upload chunk ${idx} for ${name}:`, err.message)
+            throw new Error(`Upload failed at chunk ${idx + 1}/${total} for ${name}. Try using a smaller video.`)
+          }
+          
+          // Throttle between chunks
+          if (idx < total - 1) {
+            await new Promise(r => setTimeout(r, THROTTLE_MS))
+          }
         }
       }
 
-      // Upload files SEQUENTIALLY to minimize edge 502s
-      await uploadFileInChunks(base, base_key)
-      await uploadFileInChunks(present, present_key)
+      // Upload files SEQUENTIALLY
+      await uploadFileInChunks(base, base_key, 'Base video')
+      await uploadFileInChunks(present, present_key, 'Present video')
 
       // Finalize and create job
-      const complete = await axios.post(`${API}/uploads/complete`, {
-        job_id,
-        base_key,
-        present_key,
-        sample_rate: 1,
-        metadata: meta ? JSON.parse(meta) : {}
-      })
+      const complete = await retryRequest(
+        () => axios.post(`${API}/uploads/complete`, {
+          job_id,
+          base_key,
+          present_key,
+          sample_rate: 1,
+          metadata: meta ? JSON.parse(meta) : {}
+        }),
+        3,
+        1000
+      )
 
       setJobId(complete.data.job_id)
       onJobCreated && onJobCreated(complete.data.job_id)
@@ -120,7 +176,11 @@ function Upload({ onJobCreated }) {
       } else if (err.response?.data?.message) {
         errorMsg = err.response.data.message
       } else if (err.message) {
-        errorMsg = `Upload error: ${err.message}`
+        errorMsg = err.message
+      } else if (err.response?.status === 502) {
+        errorMsg = 'Gateway timeout - try using a smaller video file (< 50MB recommended)'
+      } else if (err.code === 'ERR_NETWORK' || err.code === 'ERR_FAILED') {
+        errorMsg = 'Network error - check your connection and try a smaller video'
       }
       
       setError(errorMsg)
@@ -132,6 +192,9 @@ function Upload({ onJobCreated }) {
   return (
     <div className="card bg-gradient-to-br from-blue-50 to-indigo-50 border-2 border-blue-200">
       <h2 className="text-2xl font-bold mb-4 text-blue-900">📹 Upload Road Videos</h2>
+      <div className="mb-3 p-3 bg-blue-100 border border-blue-300 rounded text-sm text-blue-800">
+        <strong>💡 Tip:</strong> For best results, use videos under 50MB each. Larger files may take longer or timeout on free hosting.
+      </div>
       <div className="grid grid-cols-2 gap-4 mb-4">
         <div className="border-2 border-dashed border-blue-300 rounded-lg p-4 hover:bg-blue-100 transition">
           <label className="block text-sm font-semibold text-gray-700 mb-2">Base Video (Before)</label>
