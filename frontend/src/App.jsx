@@ -79,11 +79,11 @@ function Upload({ onJobCreated }) {
         const total = Math.ceil(file.size / CHUNK)
         for (let offset = 0; offset < file.size; offset += CHUNK) {
           const blob = file.slice(offset, Math.min(offset + CHUNK, file.size))
-          const buf = await blob.arrayBuffer()
-          // Retry each chunk with exponential backoff
-          await retryRequest(() => axios.post(`${API}/uploads/chunk`, new Uint8Array(buf), {
+          const form = new FormData()
+          form.append('chunk', blob, `chunk-${idx}`)
+          // Retry each chunk with exponential backoff; no custom headers (avoids preflight)
+          await retryRequest(() => axios.post(`${API}/uploads/chunk`, form, {
             params: { key, idx, total },
-            headers: { 'Content-Type': 'application/octet-stream' },
             timeout: 30000
           }), 3, 800)
           idx++

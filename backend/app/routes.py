@@ -45,13 +45,15 @@ def uploads_init():
     return {"job_id": job_id, "base_key": base_key, "present_key": present_key}
 
 @api_router.post("/uploads/chunk")
-async def upload_chunk(request: Request, key: str, idx: int, total: int):
-    """Receive a chunk and append to temp file. All chunks must be sequential."""
+async def upload_chunk(key: str, idx: int, total: int, chunk: UploadFile = File(...)):
+    """Receive a chunk via multipart/form-data to avoid CORS preflight.
+    All chunks must be sequential within a file.
+    """
     import logging
     logger = logging.getLogger(__name__)
     try:
-        # Read raw body
-        body = await request.body()
+        # Read file bytes
+        body = await chunk.read()
         if not body:
             raise HTTPException(400, "Empty chunk")
         if len(body) > CHUNK_SIZE_LIMIT:
