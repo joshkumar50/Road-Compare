@@ -1,5 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import Response
 from .config import settings
 from .routes import api_router
 import threading
@@ -62,8 +63,35 @@ app.add_middleware(
     max_age=3600,  # Cache preflight for 1 hour
 )
 
-# Note: FastAPI CORS middleware automatically handles OPTIONS preflight requests
-# No need for explicit OPTIONS handler
+# Manual CORS middleware as ABSOLUTE failsafe
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.requests import Request
+
+class ManualCORSMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        # Handle preflight
+        if request.method == "OPTIONS":
+            return Response(
+                content="",
+                headers={
+                    "Access-Control-Allow-Origin": "*",
+                    "Access-Control-Allow-Methods": "*",
+                    "Access-Control-Allow-Headers": "*",
+                    "Access-Control-Max-Age": "3600",
+                }
+            )
+        
+        # Process request
+        response = await call_next(request)
+        
+        # Add CORS headers to response
+        response.headers["Access-Control-Allow-Origin"] = "*"
+        response.headers["Access-Control-Allow-Methods"] = "*"
+        response.headers["Access-Control-Allow-Headers"] = "*"
+        
+        return response
+
+app.add_middleware(ManualCORSMiddleware)
 
 
 @app.get("/")
