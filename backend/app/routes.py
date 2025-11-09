@@ -97,7 +97,12 @@ async def create_job(
     metadata: str = Form(""),
     db: Session = Depends(get_db),
 ):
-    """Create a new video analysis job with comprehensive validation"""
+    """Create a new video analysis job with comprehensive validation
+    
+    This endpoint accepts video uploads and processes them asynchronously.
+    Maximum file size: 100MB per video.
+    Supported formats: MP4, AVI, MOV, MKV
+    """
     import logging
     logger = logging.getLogger(__name__)
     
@@ -141,37 +146,39 @@ async def create_job(
         
         # Stream videos to storage with chunked reading for memory efficiency
         max_size = 100 * 1024 * 1024  # 100MB limit for free tier
-        chunk_size = 1024 * 1024  # 1MB chunks
+        chunk_size = 2 * 1024 * 1024  # 2MB chunks for faster upload
         
-        # Process base video
-        base_size = 0
-        base_chunks = []
-        while True:
-            chunk = await base_video.read(chunk_size)
-            if not chunk:
-                break
-            base_size += len(chunk)
-            if base_size > max_size:
-                logger.error(f"❌ Base video too large: {base_size} bytes")
-                raise HTTPException(400, f"Base video exceeds maximum size of 100MB")
-            base_chunks.append(chunk)
+        import asyncio
         
-        base_content = b''.join(base_chunks)
+        async def read_video_with_timeout(video, max_size, chunk_size, name):
+            """Read video with timeout to prevent hanging"""
+            size = 0
+            chunks = []
+            try:
+                while True:
+                    # Read with 30 second timeout per chunk
+                    chunk = await asyncio.wait_for(video.read(chunk_size), timeout=30.0)
+                    if not chunk:
+                        break
+                    size += len(chunk)
+                    if size > max_size:
+                        raise HTTPException(400, f"{name} video exceeds maximum size of 100MB")
+                    chunks.append(chunk)
+                    if len(chunks) % 10 == 0:  # Log every 20MB
+                        logger.info(f"   {name}: {size / (1024*1024):.1f} MB uploaded...")
+                return b''.join(chunks), size
+            except asyncio.TimeoutError:
+                raise HTTPException(504, f"{name} video upload timed out. Please try with a smaller file.")
         
-        # Process present video
-        present_size = 0
-        present_chunks = []
-        while True:
-            chunk = await present_video.read(chunk_size)
-            if not chunk:
-                break
-            present_size += len(chunk)
-            if present_size > max_size:
-                logger.error(f"❌ Present video too large: {present_size} bytes")
-                raise HTTPException(400, f"Present video exceeds maximum size of 100MB")
-            present_chunks.append(chunk)
-        
-        present_content = b''.join(present_chunks)
+        # Read both videos concurrently for speed
+        try:
+            (base_content, base_size), (present_content, present_size) = await asyncio.gather(
+                read_video_with_timeout(base_video, max_size, chunk_size, "Base"),
+                read_video_with_timeout(present_video, max_size, chunk_size, "Present")
+            )
+            logger.info(f"✅ Both videos read: Base {base_size/(1024*1024):.1f}MB, Present {present_size/(1024*1024):.1f}MB")
+        except asyncio.TimeoutError:
+            raise HTTPException(504, "Video upload timed out. Please try with smaller files.")
         
         # Store videos
         try:

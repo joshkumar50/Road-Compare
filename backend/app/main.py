@@ -46,36 +46,20 @@ async def startup_event():
     
     logger.info("✅ RoadCompare API started successfully")
 
-# Build allowed origins list from config
-allowed_origins = [origin.strip() for origin in settings.cors_origins]
-# Always include frontend_url
-if settings.frontend_url not in allowed_origins:
-    allowed_origins.insert(0, settings.frontend_url)
+# Build allowed origins list from config - USE WILDCARD FOR VERCEL PREVIEW DEPLOYMENTS
+allowed_origins = ["*"]  # Allow all origins to fix CORS permanently
 
-# Add both Vercel domain variations and localhost
-allowed_origins.extend([
-    "https://roadcompare.vercel.app",
-    "https://road-compare.vercel.app",
-    "http://localhost:5173",
-    "http://localhost:3000",
-    "http://127.0.0.1:5173",
-    "http://127.0.0.1:3000"
-])
-
-# Remove duplicates while preserving order
-allowed_origins = list(dict.fromkeys(allowed_origins))
-
-logger.info(f"✅ CORS allowed origins: {allowed_origins}")
+logger.info(f"✅ CORS configured: Allow all origins (*)")
 
 # CORS configuration for production - CRITICAL: Must be added BEFORE routes
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=allowed_origins,  # Use configured origins
-    allow_credentials=False,  # Set to False to avoid preflight complexity
-    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH", "HEAD"],
-    allow_headers=["*"],
+    allow_origins=allowed_origins,  # Allow all
+    allow_credentials=False,  # Must be False when using wildcard
+    allow_methods=["*"],  # Allow all methods
+    allow_headers=["*"],  # Allow all headers
     expose_headers=["*"],
-    max_age=86400,  # Cache preflight for 24 hours
+    max_age=3600,  # Cache preflight for 1 hour
 )
 
 # Note: FastAPI CORS middleware automatically handles OPTIONS preflight requests
@@ -89,6 +73,7 @@ def root():
         "service": "RoadCompare API",
         "version": "1.0.0",
         "status": "running",
+        "cors": "enabled",
         "endpoints": {
             "health": "/health",
             "api": settings.api_prefix,
@@ -96,6 +81,12 @@ def root():
             "docs": "/docs"
         }
     }
+
+
+@app.options("/{path:path}")
+async def options_handler(path: str):
+    """Handle all OPTIONS requests for CORS preflight"""
+    return {"status": "ok"}
 
 
 @app.get("/health")
