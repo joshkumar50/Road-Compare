@@ -84,9 +84,11 @@ function Upload({ onJobCreated }) {
         }
       }
 
-      // Upload both files sequentially (edge-safe)
-      await uploadFileInChunks(base, base_key)
-      await uploadFileInChunks(present, present_key)
+      // Upload both files in PARALLEL (edge-safe per file; sequential within each file)
+      await Promise.all([
+        uploadFileInChunks(base, base_key),
+        uploadFileInChunks(present, present_key)
+      ])
 
       // Finalize and create job
       const complete = await axios.post(`${API}/uploads/complete`, {
